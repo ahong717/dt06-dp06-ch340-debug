@@ -1,0 +1,20 @@
+{
+  "name": "ESP8266AC 冷氣控制",
+  "short_name": "我的冷氣",
+  "description": "DT-06 冷氣本地與雲端控制",
+  "lang": "zh-Hant",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f2f6f8",
+  "theme_color": "#f2f6f8",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

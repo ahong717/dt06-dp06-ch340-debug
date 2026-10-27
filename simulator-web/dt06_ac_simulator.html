@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>智慧冷氣 UART 通訊模擬器 & 虛擬遙控器</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Courier New', 'monospace'],
+            digital: ['Orbitron', 'Courier New', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <!-- FontAwesome 6 Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
+  
+  <style>
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    .dark ::-webkit-scrollbar-thumb { background: #334155; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+
+    /* LCD Remote Screen Glare & Inset Shadow */
+    .lcd-screen {
+      background: #c3d3bb;
+      color: #1e281b;
+      box-shadow: inset 0 2px 6px rgba(0,0,0,0.35), 0 1px 0 rgba(255,255,255,0.6);
+      text-shadow: 1px 1px 0px rgba(255,255,255,0.4);
+    }
+    .dark .lcd-screen {
+      background: #1b2f29;
+      color: #4ade80;
+      box-shadow: inset 0 2px 6px rgba(0,0,0,0.7), 0 1px 0 rgba(255,255,255,0.05);
+      text-shadow: 0 0 4px rgba(74, 222, 128, 0.4);
+    }
+  </style>
+</head>
+
+<body class="h-full flex flex-col font-sans bg-slate-100 text-slate-800 dark:bg-slate-950 dark:text-slate-100 transition-colors duration-200 selection:bg-sky-500 selection:text-white">
+
+  <!-- Header Section -->
+  <header class="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 sticky top-0 z-50 px-4 lg:px-8 py-3 shadow-sm">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      
+      <!-- Title & Branding -->
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-sky-500/10 text-sky-600 dark:text-sky-400 flex items-center justify-center font-bold text-lg border border-sky-500/20">
+          <i class="fa-solid fa-snowflake"></i>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="font-bold text-base tracking-tight text-slate-900 dark:text-white">智慧冷氣 UART 模擬器</h1>
+            <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300 border border-sky-200 dark:border-sky-800">Midea / ESPHome 相容</span>
+          </div>
+          <p class="text-xs text-slate-500 dark:text-slate-400">雙向冷氣控制器 & 實體遙控器模擬測試台</p>
+        </div>
+      </div>
+
+      <!-- Quick Status & Mode Buttons -->
+      <div class="flex items-center gap-3">
+        <button id="themeToggleBtn" onclick="toggleTheme()" class="px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:border-slate-700 dark:text-slate-200">
+          <i id="themeIcon" class="fa-solid fa-moon"></i>
+          <span id="themeText">暗色</span>
+        </button>
+
+        <div id="serialStatusBadge" class="flex items-center space-x-2 px-3 py-1.5 rounded-xl text-xs font-medium bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+          <span id="statusDot" class="w-2 h-2 rounded-full bg-rose-500"></span>
+          <span id="statusText" class="font-mono">未連線</span>
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+    <!-- COM Port & Emulation Diagnostics Banner (Card 1) -->
+    <section class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4.5 shadow-sm space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-4">
+        
+        <!-- Left: COM Port Selector & Connect Button -->
+        <div class="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+          <label class="text-xs font-bold text-slate-600 dark:text-slate-300 shrink-0 flex items-center gap-1.5">
+            <i class="fa-solid fa-microchip text-sky-500"></i> COM 埠:
+          </label>
+          
+          <div class="relative min-w-[200px]">
+            <select id="portSelector" class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:border-sky-500 appearance-none cursor-pointer">
+              <option value="NEW_PORT">＋ 選擇新 USB COM 埠...</option>
+            </select>
+            <i class="fa-solid fa-chevron-down absolute right-3 top-3 text-xs text-slate-400 pointer-events-none"></i>
+          </div>
+
+          <div class="relative min-w-[120px]">
+            <select id="baudRateSelect" class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:border-sky-500 appearance-none cursor-pointer">
+              <option value="9600" selected>9600 Baud (標準)</option>
+              <option value="115200">115200 Baud (高速)</option>
+              <option value="19200">19200 Baud</option>
+              <option value="4800">4800 Baud</option>
+            </select>
+            <i class="fa-solid fa-chevron-down absolute right-3 top-3 text-xs text-slate-400 pointer-events-none"></i>
+          </div>
+
+          <button id="rescanBtn" onclick="refreshPortList()" class="bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all border border-slate-300 dark:border-slate-700 flex items-center gap-1.5">
+            <i class="fa-solid fa-arrows-rotate"></i> 重新掃描
+          </button>
+
+          <button id="connectBtn" onclick="toggleConnect()" class="bg-sky-600 hover:bg-sky-500 text-white font-bold px-5 py-2 rounded-xl text-xs transition-all shadow-md shadow-sky-600/20 flex items-center gap-1.5">
+            <i class="fa-solid fa-plug"></i> 連線
+          </button>
+        </div>
+
+        <!-- Right: Error Injection & Delay Controls -->
+        <div class="flex flex-wrap items-center gap-4 text-xs">
+          <label class="flex items-center gap-2 cursor-pointer bg-slate-50 dark:bg-slate-950 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-slate-300 select-none">
+            <input type="checkbox" id="chkIgnoreResponse" class="rounded text-sky-600 focus:ring-sky-500">
+            <span class="font-medium text-slate-700 dark:text-slate-300">故意不回應 (測試重試/逾時)</span>
+          </label>
+
+          <div class="flex items-center gap-2 bg-slate-50 dark:bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800">
+            <span class="text-slate-500">回應延遲:</span>
+            <input type="number" id="respDelayMs" value="0" min="0" max="5000" step="50" class="w-16 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-center font-mono font-bold text-sky-600 dark:text-sky-400">
+            <span class="text-slate-400 font-mono">ms</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+      <!-- Left Column (8 Cols): Cold Machine Status Grid (Matching reference picture) -->
+      <div class="lg:col-span-8 space-y-6">
+
+        <!-- Top Status Summary 4-Grid -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          
+          <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 shadow-sm">
+            <div class="text-[11px] font-bold text-slate-400 mb-1">RX 收到</div>
+            <div id="dispRxCount" class="text-2xl font-extrabold font-mono text-slate-800 dark:text-slate-100">0</div>
+          </div>
+
+          <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 shadow-sm">
+            <div class="text-[11px] font-bold text-slate-400 mb-1">TX 回傳</div>
+            <div id="dispTxCount" class="text-2xl font-extrabold font-mono text-slate-800 dark:text-slate-100">0</div>
+          </div>
+
+          <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 shadow-sm">
+            <div class="text-[11px] font-bold text-slate-400 mb-1">有效封包</div>
+            <div id="dispValidPacket" class="text-base font-bold text-emerald-600 dark:text-emerald-400 truncate">等待封包</div>
+          </div>
+
+          <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 shadow-sm">
+            <div class="text-[11px] font-bold text-slate-400 mb-1">最近動作</div>
+            <div id="dispLastAction" class="text-base font-bold text-sky-600 dark:text-sky-400 truncate">等待指令</div>
+          </div>
+
+        </div>
+
+        <!-- 8 Core Parameter Display Boxes (Exact Layout from Image) -->
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+          <div class="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+            <h2 class="font-bold text-sm text-slate-800 dark:text-slate-200 flex items-center gap-2">
+              <i class="fa-solid fa-server text-sky-500"></i> 冷氣室內機 當前運轉狀態 (已解析)
+            </h2>
+            <span id="acStateIndicator" class="text-xs px-2.5 py-0.5 rounded-full font-bold bg-slate-100 dark:bg-slate-800 text-slate-500">
+              關機中
+            </span>
+          </div>
+
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            
+            <!-- Power -->
+            <div class="bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">
+              <span class="text-[11px] text-slate-400 block mb-1">電源</span>
+              <span id="statPower" class="text-lg font-bold text-slate-800 dark:text-slate-200">關機</span>
+            </div>
+
+            <!-- Mode -->
+            <div class="bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">
+              <span class="text-[11px] text-slate-400 block mb-1">模式</span>
+              <span id="statMode" class="text-lg font-bold text-sky-600 dark:text-sky-400">冷氣</span>
+            </div>
+
+            <!-- Set Temp -->
+            <div class="bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">
+              <span class="text-[11px] text-slate-400 block mb-1">設定溫度</span>
+              <span id="statSetTemp" class="text-lg font-bold font-mono text-amber-600 dark:text-amber-400">26.0 °C</span>
+            </div>
+
+            <!-- Indoor Temp -->
+            <div class="bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">
+              <span class="text-[11px] text-slate-400 block mb-1">室內溫度</span>
+              <span id="statRoomTemp" class="text-lg font-bold font-mono text-emerald-600 dark:text-emerald-400">27.0 °C</span>
+            </div>
+
+            <!-- Outdoor Temp -->
+            <div class="bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">
+              <span class="text-[11px] text-slate-400 block mb-1">室外溫度</span>
+              <span id="statOutdoorTemp" class="text-lg font-bold font-mono text-slate-700 dark:text-slate-300">30.0 °C</span>
+            </div>
+
+            <!-- Fan Speed -->
+            <div class="bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">
+              <span class="text-[11px] text-slate-400 block mb-1">風量</span>
+              <span id="statFanSpeed" class="text-lg font-bold text-slate-800 dark:text-slate-200">自動</span>
+            </div>
+
+            <!-- Swing -->
+            <div class="bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">
+              <span class="text-[11px] text-slate-400 block mb-1">擺風</span>
+              <span id="statSwing" class="text-lg font-bold text-slate-800 dark:text-slate-200">停止</span>
+            </div>
+
+            <!-- Panel Light -->
+            <div class="bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">
+              <span class="text-[11px] text-slate-400 block mb-1">面板燈</span>
+              <span id="statLight" class="text-lg font-bold text-slate-800 dark:text-slate-200">開啟</span>
+            </div>
+
+            <!-- Preset -->
+            <div class="bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">
+              <span class="text-[11px] text-slate-400 block mb-1">Preset 情境</span>
+              <span id="statPreset" class="text-lg font-bold text-slate-800 dark:text-slate-200">一般</span>
+            </div>
+
+            <!-- On Timer -->
+            <div class="bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">
+              <span class="text-[11px] text-slate-400 block mb-1">冷氣端開機定時</span>
+              <span id="statTimerOn" class="text-lg font-bold text-slate-800 dark:text-slate-200">未設定</span>
+            </div>
+
+            <!-- Off Timer -->
+            <div class="bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">
+              <span class="text-[11px] text-slate-400 block mb-1">冷氣端關機定時</span>
+              <span id="statTimerOff" class="text-lg font-bold text-slate-800 dark:text-slate-200">未設定</span>
+            </div>
+
+            <!-- Follow Me / Eco -->
+            <div class="bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">
+              <span class="text-[11px] text-slate-400 block mb-1">ECO / 節能</span>
+              <span id="statEco" class="text-lg font-bold text-slate-800 dark:text-slate-200">關閉</span>
+            </div>
+
+          </div>
+
+          <!-- Sensor Override Simulator Input Bar -->
+          <div class="bg-slate-100 dark:bg-slate-950 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div class="flex items-center gap-4">
+              <span class="font-bold text-slate-600 dark:text-slate-300">模擬感測值:</span>
+              <div class="flex items-center gap-1.5">
+                <span class="text-slate-500">室內</span>
+                <input type="number" id="inputSimIndoor" value="27.0" min="-10" max="50" step="0.5" class="w-16 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-2 py-1 font-mono font-bold text-center">
+                <span class="text-slate-400">°C</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="text-slate-500">室外</span>
+                <input type="number" id="inputSimOutdoor" value="30.0" min="-20" max="60" step="0.5" class="w-16 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-2 py-1 font-mono font-bold text-center">
+                <span class="text-slate-400">°C</span>
+              </div>
+            </div>
+
+            <button onclick="applySimSensors()" class="bg-sky-600 hover:bg-sky-500 text-white font-bold px-4 py-1.5 rounded-lg transition-all shadow-sm">
+              套用並在下次查詢回報
+            </button>
+          </div>
+
+        </div>
+
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-3">
+          <div class="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+            <h3 class="font-bold text-xs text-slate-800 dark:text-slate-200 flex items-center gap-2">
+              <i class="fa-solid fa-terminal text-emerald-500"></i> UART 封包與解讀紀錄
+            </h3>
+            <button onclick="clearTerminal()" class="text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 px-3 py-1 rounded-lg border border-slate-200 dark:border-slate-700 transition">
+              <i class="fa-solid fa-trash-can text-rose-500"></i> 清除
+            </button>
+          </div>
+
+          <!-- Log Window -->
+          <div id="terminalWindow" class="h-48 bg-slate-950 border border-slate-800 rounded-xl p-3 font-mono text-xs overflow-y-auto space-y-1.5 text-slate-200">
+            <div class="text-slate-500 italic">[System] UART 模擬伺服器待命。請選擇 USB COM 埠並連線...</div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="lg:col-span-4 space-y-4">
+        
+        <!-- Remote Control Outer Casing -->
+        <div class="bg-gradient-to-b from-slate-200 to-slate-300 dark:from-slate-800 dark:to-slate-900 p-5 rounded-[2.5rem] border-4 border-slate-300 dark:border-slate-700 shadow-2xl space-y-5">
+          
+          <div class="text-center">
+            <span class="font-bold text-xs tracking-widest text-slate-500 dark:text-slate-400 uppercase">AC REMOTE CONTROLLER</span>
+          </div>
+
+          <!-- Realistic LCD Screen -->
+          <div class="lcd-screen rounded-2xl p-4 space-y-3 font-mono border-2 border-slate-400/40 dark:border-emerald-900/60 transition-all">
+            
+            <!-- Top Icons Line -->
+            <div class="flex justify-between items-center text-xs font-bold border-b border-black/10 dark:border-emerald-500/20 pb-1">
+              <span id="lcdModeIcon" class="flex items-center gap-1"><i class="fa-solid fa-snowflake"></i> COOL</span>
+              <span id="lcdFanIcon" class="flex items-center gap-1"><i class="fa-solid fa-wind"></i> AUTO</span>
+              <span id="lcdSwingIcon"><i class="fa-solid fa-up-down"></i></span>
+            </div>
+
+            <!-- Big Main Digital Temperature Display -->
+            <div class="flex items-baseline justify-center gap-1 py-1">
+              <span id="lcdBigTemp" class="text-5xl font-black font-digital tracking-tight">26</span>
+              <span class="text-2xl font-bold">.0</span>
+              <span class="text-2xl font-bold font-sans">°C</span>
+            </div>
+
+            <!-- Bottom Sub Status (Room Temp / Eco / Turbo) -->
+            <div class="flex justify-between items-center text-[10px] font-bold pt-1 border-t border-black/10 dark:border-emerald-500/20">
+              <span>ROOM: <span id="lcdRoomTemp">27.0</span>°C</span>
+              <span id="lcdEcoTag" class="opacity-30">ECO</span>
+              <span id="lcdTurboTag" class="opacity-30">TURBO</span>
+              <span id="lcdLightTag">LIGHT</span>
+            </div>
+          </div>
+
+          <!-- Remote Buttons Grid -->
+          <div class="space-y-3 pt-1">
+            
+            <!-- Row 1: Big Power Button & Mode Switch -->
+            <div class="grid grid-cols-2 gap-3">
+              <button onclick="remoteTogglePower()" class="bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-bold py-3 px-3 rounded-2xl shadow-md transition-all flex items-center justify-center gap-2 text-sm">
+                <i class="fa-solid fa-power-off"></i> 電源
+              </button>
+              <button onclick="remoteCycleMode()" class="bg-slate-100 dark:bg-slate-800 hover:bg-white dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold py-3 px-3 rounded-2xl shadow border border-slate-300 dark:border-slate-700 transition-all flex items-center justify-center gap-1.5 text-xs">
+                <i class="fa-solid fa-rotate text-sky-500"></i> 模式切換
+              </button>
+            </div>
+
+            <!-- Row 2: Temperature Up / Down -->
+            <div class="grid grid-cols-2 gap-3">
+              <button onclick="remoteAdjustTemp(0.5)" class="bg-slate-100 dark:bg-slate-800 hover:bg-white dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold py-3.5 px-3 rounded-2xl shadow border border-slate-300 dark:border-slate-700 transition-all flex items-center justify-center gap-2 text-base">
+                <i class="fa-solid fa-plus text-amber-500"></i> 升溫
+              </button>
+              <button onclick="remoteAdjustTemp(-0.5)" class="bg-slate-100 dark:bg-slate-800 hover:bg-white dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold py-3.5 px-3 rounded-2xl shadow border border-slate-300 dark:border-slate-700 transition-all flex items-center justify-center gap-2 text-base">
+                <i class="fa-solid fa-minus text-sky-500"></i> 降溫
+              </button>
+            </div>
+
+            <!-- Row 3: Fan Speed & Swing -->
+            <div class="grid grid-cols-2 gap-3">
+              <button onclick="remoteCycleFan()" class="bg-slate-100 dark:bg-slate-800 hover:bg-white dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold py-2.5 px-3 rounded-xl shadow border border-slate-300 dark:border-slate-700 transition-all flex items-center justify-center gap-1 text-xs">
+                <i class="fa-solid fa-fan text-emerald-500"></i> 風速調節
+              </button>
+              <button onclick="remoteToggleSwing()" class="bg-slate-100 dark:bg-slate-800 hover:bg-white dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold py-2.5 px-3 rounded-xl shadow border border-slate-300 dark:border-slate-700 transition-all flex items-center justify-center gap-1 text-xs">
+                <i class="fa-solid fa-water text-cyan-500"></i> 上下擺葉
+              </button>
+            </div>
+
+            <!-- Row 4: Eco, Turbo, Display Light -->
+            <div class="grid grid-cols-3 gap-2 pt-1 text-[11px]">
+              <button onclick="remoteToggleEco()" class="bg-slate-100 dark:bg-slate-800 hover:bg-white dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold py-2 rounded-xl shadow border border-slate-300 dark:border-slate-700">
+                ECO 節能
+              </button>
+              <button onclick="remoteToggleTurbo()" class="bg-slate-100 dark:bg-slate-800 hover:bg-white dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold py-2 rounded-xl shadow border border-slate-300 dark:border-slate-700">
+                TURBO 強力
+              </button>
+              <button onclick="remoteToggleLight()" class="bg-slate-100 dark:bg-slate-800 hover:bg-white dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold py-2 rounded-xl shadow border border-slate-300 dark:border-slate-700">
+                面板燈光
+              </button>
+            </div>
+
+          </div>
+
+          <!-- Remote Tip Hint -->
+          <div class="text-center text-[10px] text-slate-500 dark:text-slate-400">
+            按鍵變更會即時更新狀態機，並在控制板查詢時同步回應
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <script>
+    // --- Air Conditioner Simulator Internal State ---
+    const acState = {
+      power: false,          // true: ON, false: OFF
+      mode: 2,              // 1: Auto, 2: Cool, 3: Dry, 4: Heat, 5: FanOnly
+      targetTemp: 26.0,     // 16.0 ~ 31.0 °C
+      indoorTemp: 27.0,     // Room Temp
+      outdoorTemp: 30.0,    // Outdoor Temp
+      fanSpeed: 102,        // 102: Auto, 80: High, 60: Med, 40: Low, 20: Silent
+      swing: 0,             // 0=stop, 0x03=LR, 0x0C=UD, 0x0F=both
+      panelLight: true,     // Light
+      ecoMode: false,
+      turboMode: false,
+      sleepMode: false,
+      timerOnMinutes: null,  // null = no timer
+      timerOffMinutes: null,
+      lastActionText: '等待 DT-06 / ESPHome',
+      rxCount: 0,
+      txCount: 0,
+      timerTickMs: Date.now(),
+    };
+
+    // --- Web Serial State ---
+    let port = null;
+    let reader = null;
+    let writer = null;
+    let keepReading = false;
+    let isConnected = false;
+    let isDarkMode = false;
+    let rxRawBuffer = [];
+
+    // --- Mode Dictionaries ---
+    const MODE_NAMES = { 1: '自動', 2: '冷氣', 3: '除濕', 4: '暖氣', 5: '送風' };
+    const FAN_NAMES = { 102: '自動', 80: '高速', 60: '中速', 40: '低速', 20: '靜音' };
+
+    // --- Theme Switcher ---
+    function toggleTheme() {
+      isDarkMode = !isDarkMode;
+      const htmlEl = document.documentElement;
+      const iconEl = document.getElementById('themeIcon');
+      const textEl = document.getElementById('themeText');
+
+      if (isDarkMode) {
+        htmlEl.classList.add('dark');
+        iconEl.className = 'fa-solid fa-sun text-amber-400';
+        textEl.textContent = '亮色';
+      } else {
+        htmlEl.classList.remove('dark');
+        iconEl.className = 'fa-solid fa-moon';
+        textEl.textContent = '暗色';
+      }
+    }
+
+    // --- Web Serial Connection Handlers ---
+    async function refreshPortList() {
+      if (!('serial' in navigator)) {
+        logToTerminal('ERR', '您的瀏覽器不支援 Web Serial API (請用 Chrome 或 Edge)', 'err');
+        return;
+      }
+      try {
+        const ports = await navigator.serial.getPorts();
+        const selector = document.getElementById('portSelector');
+        selector.innerHTML = '<option value="NEW_PORT">＋ 選擇新 USB COM 埠...</option>';
+        
+        ports.forEach((p, idx) => {
+          const info = p.getInfo();
+          const usbId = (info.usbVendorId) ? ` (VID: 0x${info.usbVendorId.toString(16).padStart(4, '0')})` : '';
+          const opt = document.createElement('option');
+          opt.value = idx;
+          opt.textContent = `COM 裝置 #${idx + 1}${usbId}`;
+          selector.appendChild(opt);
+        });
+
+        if (ports.length > 0) {
+          selector.selectedIndex = 1;
+        }
+        logToTerminal('SYS', `掃描到 ${ports.length} 個已授權的 USB 串口裝置`, 'sys');
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function toggleConnect() {
+      if (isConnected) {
+        await disconnectSerial();
+      } else {
+        await connectSerial();
+      }
+    }
+
+    async function connectSerial() {
+      if (!('serial' in navigator)) {
+        alert('您的瀏覽器不支援 Web Serial API，請使用 Google Chrome 或 Microsoft Edge。');
+        return;
+      }
+
+      try {
+        const selector = document.getElementById('portSelector');
+        const ports = await navigator.serial.getPorts();
+        
+        if (selector.value === 'NEW_PORT' || ports.length === 0) {
+          port = await navigator.serial.requestPort();
+        } else {
+          const idx = parseInt(selector.value, 10);
+          port = ports[idx] || (await navigator.serial.requestPort());
+        }
+
+        const baud = parseInt(document.getElementById('baudRateSelect').value, 10);
+        logToTerminal('SYS', `正在連接 COM 埠... Baud Rate: ${baud}`, 'sys');
+
+        await port.open({
+          baudRate: baud,
+          dataBits: 8,
+          parity: 'none',
+          stopBits: 1
+        });
+
+        isConnected = true;
+        updateConnectUI(true);
+        logToTerminal('SYS', `COM 埠已開啟！開始監聽智慧控制板指令...`, 'sys');
+
+        keepReading = true;
+        startReadingLoop();
+        await refreshPortList();
+
+      } catch (err) {
+        console.error(err);
+        logToTerminal('ERR', `連線失敗: ${err.message}`, 'err');
+        updateConnectUI(false);
+      }
+    }
+
+    async function disconnectSerial() {
+      keepReading = false;
+      if (reader) {
+        try { await reader.cancel(); } catch (e) {}
+      }
+      if (writer) {
+        try { writer.releaseLock(); } catch (e) {}
+      }
+      if (port) {
+        try { await port.close(); } catch (e) {}
+      }
+      port = null;
+      reader = null;
+      writer = null;
+      isConnected = false;
+      updateConnectUI(false);
+      logToTerminal('SYS', 'COM 埠已中斷連線。', 'sys');
+    }
+
+    function updateConnectUI(connected) {
+      const badge = document.getElementById('serialStatusBadge');
+      const dot = document.getElementById('statusDot');
+      const text = document.getElementById('statusText');
+      const btn = document.getElementById('connectBtn');
+
+      if (connected) {
+        badge.className = "flex items-center space-x-2 px-3 py-1.5 rounded-xl text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20";
+        dot.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+        text.textContent = `已連線 (${document.getElementById('baudRateSelect').value})`;
+        btn.className = "bg-rose-600 hover:bg-rose-500 text-white font-bold px-5 py-2 rounded-xl text-xs transition-all shadow-md flex items-center gap-1.5";
+        btn.innerHTML = '<i class="fa-solid fa-xmark"></i> 斷線';
+      } else {
+        badge.className = "flex items-center space-x-2 px-3 py-1.5 rounded-xl text-xs font-medium bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20";
+        dot.className = "w-2 h-2 rounded-full bg-rose-500";
+        text.textContent = '未連線';
+        btn.className = "bg-sky-600 hover:bg-sky-500 text-white font-bold px-5 py-2 rounded-xl text-xs transition-all shadow-md shadow-sky-600/20 flex items-center gap-1.5";
+        btn.innerHTML = '<i class="fa-solid fa-plug"></i> 連線';
+      }
+    }
+
+    async function startReadingLoop() {
+      while (keepReading && port && port.readable) {
+        try {
+          reader = port.readable.getReader();
+          while (keepReading) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (value) {
+              handleIncomingBytes(value);
+            }
+          }
+        } catch (e) {
+          if (keepReading) {
+            logToTerminal('ERR', `讀取錯誤: ${e.message}`, 'err');
+          }
+        } finally {
+          if (reader) {
+            reader.releaseLock();
+            reader = null;
+          }
+        }
+      }
+    }
+
+    function handleIncomingBytes(uint8Array) {
+      for (let i = 0; i < uint8Array.length; i++) {
+        rxRawBuffer.push(uint8Array[i]);
+      }
+
+      // Check for Midea / ESPHome UART Frame (Preamble 0xAA)
+      while (rxRawBuffer.length > 0) {
+        // Find Header 0xAA
+        const headerIdx = rxRawBuffer.indexOf(0xAA);
+        if (headerIdx === -1) {
+          rxRawBuffer = [];
+          break;
+        }
+
+        if (headerIdx > 0) {
+          rxRawBuffer.splice(0, headerIdx);
+        }
+
+        // Need at least 2 bytes to read length
+        if (rxRawBuffer.length < 2) break;
+
+        const frameLen = rxRawBuffer[1] + 1; // standard Midea length byte
+        if (frameLen < 5 || frameLen > 64) {
+          // invalid length, drop header
+          rxRawBuffer.shift();
+          continue;
+        }
+
+        if (rxRawBuffer.length < frameLen) {
+          // Wait for full packet
+          break;
+        }
+
+        // Extract complete frame
+        const frame = rxRawBuffer.splice(0, frameLen);
+        processMideaFrame(frame).catch(e => logToTerminal('ERR', `封包處理失敗: ${e.message}`, 'err'));
+      }
+    }
+
+    function calculateMideaChecksum(bytesWithoutChecksum) {
+      let sum = 0;
+      for (let i = 1; i < bytesWithoutChecksum.length; i++) {
+        sum += bytesWithoutChecksum[i];
+      }
+      return ((-sum) & 0xFF);
+    }
+
+    // CRC-8/MAXIM (poly=0x8C, matches MideaUART FrameData::m_calcCRC)
+    function crc8(data) {
+      let crc = 0;
+      for (const b of data) {
+        crc ^= b;
+        for (let i = 0; i < 8; i++) {
+          crc = (crc & 1) ? ((crc >> 1) ^ 0x8C) : (crc >> 1);
+        }
+      }
+      return crc;
+    }
+
+    // decode_timer from ac_emulator.py: returns minutes or null
+    function decodeTimer(value) {
+      if (!(value & 0x80)) return null;
+      return ((value >> 2) & 0x1F) * 60 + (value & 0x03) * 15;
+    }
+
+    // encode_timer: returns 0x7F if null
+    function encodeTimer(minutes) {
+      if (minutes === null || minutes === undefined) return 0x7F;
+      const quarters = Math.max(1, Math.min(127, Math.ceil(minutes / 15.0)));
+      return 0x80 | quarters;
+    }
+
+    async function processMideaFrame(frame) {
+      acState.rxCount++;
+      document.getElementById('dispRxCount').textContent = acState.rxCount;
+
+      const hexStr = Array.from(frame).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+      logToTerminal('RX', hexStr, 'rx');
+
+      if (frame.length < 12 || frame[0] !== 0xAA) {
+        logToTerminal('ERR', '封包長度或標頭錯誤，已丟棄', 'err');
+        return;
+      }
+
+      // 驗證 sync byte: frame[3] = frame[1] XOR frame[2]
+      const expectedSync = (frame[1] ^ frame[2]) & 0xFF;
+      if (frame[3] !== expectedSync) {
+        logToTerminal('ERR', `Sync 不匹配 frame[3]=0x${frame[3].toString(16).toUpperCase()} 應為 0x${expectedSync.toString(16).toUpperCase()}`, 'err');
+        return;
+      }
+
+      // 驗證外部 checksum: sum(frame[1:]) & 0xFF 應 == 0
+      const outerSum = frame.slice(1).reduce((a, b) => a + b, 0) & 0xFF;
+      if (outerSum !== 0) {
+        logToTerminal('ERR', `Checksum 錯誤 (加總 mod 256 = 0x${outerSum.toString(16).toUpperCase()})`, 'err');
+        return;
+      }
+
+      // 驗證 body CRC-8 (body = frame[10..-2])
+      if (frame.length > 12) {
+        const body = frame.slice(10, frame.length - 1);
+        if (body.length > 0 && crc8(body) !== 0) {
+          logToTerminal('ERR', `Body CRC-8 不匹配，已丟棄封包`, 'err');
+          return;
+        }
+      }
+
+      // Midea UART V3 實際格式 (參考 midea_protocol.py):
+      //   frame[0] = 0xAA
+      //   frame[1] = len (total-1)
+      //   frame[2] = 0xAC
+      //   frame[3] = frame[1] ^ frame[2]  (sync byte, NOT sub-type!)
+      //   frame[4..7] = 0x00
+      //   frame[8] = 0x03=DEVICE_QUERY / 0x02=DEVICE_CONTROL
+      //   frame[9] = 0x41=狀態查詢 / 0x40=控制指令 / 0xB5=能力查詢
+      //   frame[10..-2] = body (含 CRC-8)
+      //   frame[-1] = 外部 checksum
+      const protocol = frame[8];
+      const frameType = frame[9];  // 0x03=QUERY, 0x02=CONTROL
+      const body = frame.slice(10, frame.length - 1);
+      const cmdId = body[0];       // 0x41=query, 0x40=set, 0xB5=capabilities
+
+      document.getElementById('dispValidPacket').textContent = `type:0x${frameType.toString(16).padStart(2,'0').toUpperCase()} cmd:0x${cmdId.toString(16).padStart(2,'0').toUpperCase()}`;
+
+      if (frameType === 0x03 && cmdId === 0x41) {
+        // 狀態查詢
+        acState.lastActionText = '狀態查詢 (Query 0x41)';
+        document.getElementById('dispLastAction').textContent = acState.lastActionText;
+        await respondStatusFrame(frame);
+
+      } else if (frameType === 0x02 && cmdId === 0x40) {
+        // 控制指令 (SET)
+        acState.lastActionText = '接收控制指令 (Control 0x40)';
+        document.getElementById('dispLastAction').textContent = acState.lastActionText;
+        parseControlFrame(body);
+        await respondStatusFrame(frame);
+
+      } else if (frameType === 0x03 && cmdId === 0xB5) {
+        // 能力查詢 (Capabilities)
+        acState.lastActionText = '能力查詢 (Capabilities 0xB5)';
+        document.getElementById('dispLastAction').textContent = acState.lastActionText;
+        await respondCapabilitiesFrame(frame);
+
+      } else {
+        // 未知封包不回覆，避免將未支援命令誤判為成功
+        acState.lastActionText = `未知封包 type:0x${frameType.toString(16).toUpperCase()} cmd:0x${cmdId.toString(16).toUpperCase()}`;
+        document.getElementById('dispLastAction').textContent = acState.lastActionText;
+        logToTerminal('SYS', acState.lastActionText, 'sys');
+      }
+    }
+
+    // 解析控制指令幀 (frame[8]=0x02, frame[9]=0x40)
+    // 參考 ac_emulator.py _apply_control(body) where body = frame[10:-1]
+    //   body[0] = frame[10] = 命令標識 (通常為 0x40 或旗標)
+    //   body[1] = frame[11] = 電源 (bit0=ON, bit6=beeper)
+    //   body[2] = frame[12] = 模式+溫度 (bits[7:5]=mode, bit4=0.5°C, bits[3:0]=temp-16)
+    //   body[3] = frame[13] = 風量 (20/40/60/80/100/102)
+    //   body[4] = frame[14] = 開機定時
+    //   body[5] = frame[15] = 關機定時
+    //   body[7] = frame[17] = 擺風 (bits[3:0])
+    //   body[8] = frame[18] = 強力 (bit5)
+    //   body[9] = frame[19] = ECO (bits 0x90)
+    //   body[10]= frame[20] = 睡眠 (bit0) / 強力 (bit1)
+    function parseControlFrame(body) {
+      if (body.length < 6) return;
+
+      // body[1] = frame[11]: 電源
+      acState.power = !!(body[1] & 0x01);
+
+      // body[2] = frame[12]: 模式 + 溫度
+      const modeTempByte = body[2];
+      const modeBits = (modeTempByte >> 5) & 0x07;
+      if (modeBits >= 1 && modeBits <= 5) acState.mode = modeBits;
+      const tempInt = (modeTempByte & 0x0F) + 16;
+      const tempHalf = (modeTempByte & 0x10) ? 0.5 : 0.0;
+      if (tempInt >= 16 && tempInt <= 31) acState.targetTemp = tempInt + tempHalf;
+
+      // body[3] = frame[13]: 風量
+      if (body[3] > 0) acState.fanSpeed = body[3];
+
+      // body[4/5] = frame[14/15]: 定時
+      if (body.length > 5) {
+        acState.timerOnMinutes = decodeTimer(body[4]);
+        acState.timerOffMinutes = decodeTimer(body[5]);
+      }
+
+      // body[7] = frame[17]: 擺風
+      if (body.length > 7) acState.swing = body[7] & 0x0F;
+
+      // body[8..10] = frame[18..20]: preset
+      if (body.length > 10) {
+        const b8 = body[8], b9 = body[9], b10 = body[10];
+        if (b9 & 0x90) {
+          acState.ecoMode = true; acState.turboMode = false; acState.sleepMode = false;
+        } else if ((b8 & 0x20) || (b10 & 0x02)) {
+          acState.turboMode = true; acState.ecoMode = false; acState.sleepMode = false;
+        } else if (b10 & 0x01) {
+          acState.sleepMode = true; acState.ecoMode = false; acState.turboMode = false;
+        } else {
+          acState.ecoMode = false; acState.turboMode = false; acState.sleepMode = false;
+        }
+      }
+
+      updateDashboardUI();
+      logToTerminal('SYS', `[控制] 電源:${acState.power?'開機':'關機'} 模式:${MODE_NAMES[acState.mode]||acState.mode} 溫度:${acState.targetTemp.toFixed(1)}°C 風量:${acState.fanSpeed}`, 'sys');
+    }
+
+    async function respondStatusFrame(reqFrame) {
+      if (document.getElementById('chkIgnoreResponse').checked) {
+        logToTerminal('SYS', `[故意不回應] 略過本次 TX 回覆`, 'sys');
+        return;
+      }
+      const delay = parseInt(document.getElementById('respDelayMs').value, 10) || 0;
+      if (delay > 0) await new Promise(r => setTimeout(r, delay));
+
+      const frame = buildMideaStatusPayload(reqFrame);
+      await sendSerialBytes(frame);
+      acState.txCount++;
+      document.getElementById('dispTxCount').textContent = acState.txCount;
+    }
+
+    async function respondCapabilitiesFrame(reqFrame) {
+      if (document.getElementById('chkIgnoreResponse').checked) {
+        logToTerminal('SYS', `[故意不回應] 略過能力查詢 TX`, 'sys');
+        return;
+      }
+      const delay = parseInt(document.getElementById('respDelayMs').value, 10) || 0;
+      if (delay > 0) await new Promise(r => setTimeout(r, delay));
+
+      const frame = buildCapabilitiesPayload(reqFrame);
+      await sendSerialBytes(frame);
+      acState.txCount++;
+      document.getElementById('dispTxCount').textContent = acState.txCount;
+    }
+
+    // 建立完整外部幀: AA len AC sync 00×4 proto ftype [body...] [CRC] checksum
+    // 參考 midea_protocol.py build_frame()
+    function buildOuterFrame(reqFrame, bodyWithCRC) {
+      const protocol  = reqFrame ? reqFrame[8] : 0x03;
+      const frameType = reqFrame ? reqFrame[9] : 0x41;
+      const total = 10 + bodyWithCRC.length + 1;  // header + body+CRC + checksum
+      const buf = new Uint8Array(total);
+      buf[0] = 0xAA;
+      buf[1] = total - 1;                          // len field
+      buf[2] = 0xAC;
+      buf[3] = (buf[1] ^ buf[2]) & 0xFF;           // sync = len XOR 0xAC
+      // buf[4..7] = 0x00 (already 0)
+      buf[8] = protocol;
+      buf[9] = frameType;
+      for (let i = 0; i < bodyWithCRC.length; i++) buf[10 + i] = bodyWithCRC[i];
+      // outer checksum: (-sum(buf[1:-1])) & 0xFF
+      let s = 0;
+      for (let i = 1; i < total - 1; i++) s += buf[i];
+      buf[total - 1] = ((-s) & 0xFF);
+      return buf;
+    }
+
+    // 建立狀態回應幀 — 參考 ac_emulator.py _status_body() + _status_response()
+    // body[0]=0xC0, body[1]=power, body[2]=mode+temp, body[3]=fan,
+    // body[4]=on_timer, body[5]=off_timer, body[7]=0x30|swing,
+    // body[11]=indoor_T×2+50, body[12]=outdoor_T×2+50, body[13]=intTemp-12,
+    // body[23]=sequence, body[24]=CRC-8 of body[0..23]
+    function buildMideaStatusPayload(reqFrame) {
+      // sequence from request body[-2] = reqFrame[reqFrame.length - 3]
+      const sequence = (reqFrame && reqFrame.length >= 3) ? reqFrame[reqFrame.length - 3] : 0;
+
+      const bodyData = new Uint8Array(24);
+      bodyData[0] = 0xC0;
+      bodyData[1] = acState.power ? 0x01 : 0x00;
+
+      const intTemp = Math.floor(acState.targetTemp);
+      let b2 = ((acState.mode & 0x07) << 5) | Math.max(0, Math.min(14, intTemp - 16));
+      if ((acState.targetTemp - intTemp) >= 0.25) b2 |= 0x10;
+      bodyData[2] = b2;
+
+      bodyData[3] = acState.fanSpeed;
+      bodyData[4] = encodeTimer(acState.timerOnMinutes);
+      bodyData[5] = encodeTimer(acState.timerOffMinutes);
+      bodyData[7] = 0x30 | (acState.swing & 0x0F);
+
+      if (acState.turboMode) {
+        bodyData[8] |= 0x20;
+        bodyData[10] |= 0x02;
+      } else if (acState.ecoMode) {
+        bodyData[9] |= 0x10;
+      } else if (acState.sleepMode) {
+        bodyData[10] |= 0x01;
+      }
+
+      bodyData[11] = Math.max(0, Math.min(255, 50 + Math.round(acState.indoorTemp * 2)));
+      bodyData[12] = Math.max(0, Math.min(255, 50 + Math.round(acState.outdoorTemp * 2)));
+      bodyData[13] = Math.max(0, Math.min(31, intTemp - 12));
+      bodyData[23] = sequence & 0xFF;
+
+      const bodyCRC = crc8(bodyData);
+      const bodyWithCRC = new Uint8Array(25);
+      bodyWithCRC.set(bodyData);
+      bodyWithCRC[24] = bodyCRC;
+
+      return buildOuterFrame(reqFrame, bodyWithCRC);
+    }
+
+    // 建立能力回應幀 — 參考 ac_emulator.py _capabilities_response()
+    function buildCapabilitiesPayload(reqFrame) {
+      const entries = [
+        [0x0214, [1]],
+        [0x0215, [1]],
+        [0x0225, [32, 60, 32, 60, 32, 60, 1]],
+        [0x0224, [1]],
+        [0x022C, [1]],
+        [0x0212, [1]],
+        [0x021A, [1]],
+        [0x0213, [1]],
+      ];
+      const data = [0xB5, entries.length];
+      for (const [capId, val] of entries) {
+        data.push(capId & 0xFF, (capId >> 8) & 0xFF, val.length, ...val);
+      }
+      data.push(0, 0);
+      const dataArr = new Uint8Array(data);
+      const bodyCRC = crc8(dataArr);
+      const bodyWithCRC = new Uint8Array(data.length + 1);
+      bodyWithCRC.set(dataArr);
+      bodyWithCRC[data.length] = bodyCRC;
+      return buildOuterFrame(reqFrame, bodyWithCRC);
+    }
+
+    async function sendSerialBytes(uint8Array) {
+      if (!port || !port.writable) return;
+      try {
+        writer = port.writable.getWriter();
+        await writer.write(uint8Array);
+        writer.releaseLock();
+        writer = null;
+
+        const hexStr = Array.from(uint8Array).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+        logToTerminal('TX', hexStr, 'tx');
+      } catch (e) {
+        logToTerminal('ERR', `TX 發送失敗: ${e.message}`, 'err');
+      }
+    }
+
+    function remoteTogglePower() {
+      acState.power = !acState.power;
+      acState.lastActionText = `遙控器: 電源切換為 ${acState.power ? '開啟' : '關閉'}`;
+      updateDashboardUI();
+    }
+
+    function remoteCycleMode() {
+      acState.mode = (acState.mode % 5) + 1;
+      acState.lastActionText = `遙控器: 模式切換為 ${MODE_NAMES[acState.mode]}`;
+      updateDashboardUI();
+    }
+
+    function remoteAdjustTemp(delta) {
+      acState.targetTemp = Math.max(16.0, Math.min(31.0, acState.targetTemp + delta));
+      acState.lastActionText = `遙控器: 調節溫度為 ${acState.targetTemp.toFixed(1)}°C`;
+      updateDashboardUI();
+    }
+
+    function remoteCycleFan() {
+      const speeds = [102, 20, 40, 60, 80];
+      const curIdx = speeds.indexOf(acState.fanSpeed);
+      acState.fanSpeed = speeds[(curIdx + 1) % speeds.length];
+      acState.lastActionText = `遙控器: 風速切換為 ${FAN_NAMES[acState.fanSpeed] || '自動'}`;
+      updateDashboardUI();
+    }
+
+    function remoteToggleSwing() {
+      // cycle: 停止 → 上下 → 左右 → 上下+左右 → 停止
+      const states = [0x00, 0x0C, 0x03, 0x0F];
+      const idx = states.indexOf(acState.swing);
+      acState.swing = states[(idx + 1) % states.length];
+      const SWING_NAMES = {0x00:'停止', 0x03:'左右', 0x0C:'上下', 0x0F:'上下+左右'};
+      acState.lastActionText = `遙控器: 擺風切換為 ${SWING_NAMES[acState.swing]}`;
+      updateDashboardUI();
+    }
+
+    function remoteToggleEco() {
+      acState.ecoMode = !acState.ecoMode;
+      acState.lastActionText = `遙控器: ECO 節能 ${acState.ecoMode ? '開啟' : '關閉'}`;
+      updateDashboardUI();
+    }
+
+    function remoteToggleTurbo() {
+      acState.turboMode = !acState.turboMode;
+      acState.lastActionText = `遙控器: TURBO 強力 ${acState.turboMode ? '開啟' : '關閉'}`;
+      updateDashboardUI();
+    }
+
+    function remoteToggleLight() {
+      acState.panelLight = !acState.panelLight;
+      acState.lastActionText = `遙控器: 面板燈光 ${acState.panelLight ? '開啟' : '關閉'}`;
+      updateDashboardUI();
+    }
+
+    function applySimSensors() {
+      const inT = parseFloat(document.getElementById('inputSimIndoor').value) || 27.0;
+      const outT = parseFloat(document.getElementById('inputSimOutdoor').value) || 30.0;
+      acState.indoorTemp = inT;
+      acState.outdoorTemp = outT;
+      acState.lastActionText = `手動更新環境溫: 室內 ${inT}°C / 室外 ${outT}°C`;
+      updateDashboardUI();
+      logToTerminal('SYS', `已設定模擬感測值: 室內 ${inT}°C, 室外 ${outT}°C (下次輪詢生效)`, 'sys');
+    }
+
+    // 冷氣端倒數：由虛擬冷氣自己計時，不依賴 DT-06 持續在線。
+    function tickAcTimers() {
+      const now = Date.now();
+      const elapsedMinutes = Math.floor((now - acState.timerTickMs) / 60000);
+      if (elapsedMinutes <= 0) return;
+      acState.timerTickMs += elapsedMinutes * 60000;
+
+      let changed = false;
+      if (acState.timerOnMinutes !== null) {
+        acState.timerOnMinutes = Math.max(0, acState.timerOnMinutes - elapsedMinutes);
+        if (acState.timerOnMinutes === 0) {
+          acState.timerOnMinutes = null;
+          acState.power = true;
+          acState.lastActionText = '冷氣端倒數完成：自動開機';
+          logToTerminal('SYS', acState.lastActionText, 'sys');
+        }
+        changed = true;
+      }
+      if (acState.timerOffMinutes !== null) {
+        acState.timerOffMinutes = Math.max(0, acState.timerOffMinutes - elapsedMinutes);
+        if (acState.timerOffMinutes === 0) {
+          acState.timerOffMinutes = null;
+          acState.power = false;
+          acState.lastActionText = '冷氣端倒數完成：自動關機';
+          logToTerminal('SYS', acState.lastActionText, 'sys');
+        }
+        changed = true;
+      }
+      if (changed) updateDashboardUI();
+    }
+
+    function updateDashboardUI() {
+      // 1. Air Conditioner Dashboard Status
+      const powerEl = document.getElementById('statPower');
+      const indEl = document.getElementById('acStateIndicator');
+      
+      if (acState.power) {
+        powerEl.textContent = '開機';
+        powerEl.className = 'text-lg font-bold text-emerald-600 dark:text-emerald-400';
+        indEl.textContent = '運轉中';
+        indEl.className = 'text-xs px-2.5 py-0.5 rounded-full font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20';
+      } else {
+        powerEl.textContent = '關機';
+        powerEl.className = 'text-lg font-bold text-slate-800 dark:text-slate-200';
+        indEl.textContent = '關機中';
+        indEl.className = 'text-xs px-2.5 py-0.5 rounded-full font-bold bg-slate-100 dark:bg-slate-800 text-slate-500';
+      }
+
+      document.getElementById('statMode').textContent = acState.power ? MODE_NAMES[acState.mode] : '關機';
+      document.getElementById('statSetTemp').textContent = `${acState.targetTemp.toFixed(1)} °C`;
+      document.getElementById('statRoomTemp').textContent = `${acState.indoorTemp.toFixed(1)} °C`;
+      document.getElementById('statOutdoorTemp').textContent = `${acState.outdoorTemp.toFixed(1)} °C`;
+      document.getElementById('statFanSpeed').textContent = FAN_NAMES[acState.fanSpeed] || '自動';
+      const SWING_NAMES = {0x00:'停止', 0x03:'左右', 0x0C:'上下', 0x0F:'上下+左右'};
+      document.getElementById('statSwing').textContent = SWING_NAMES[acState.swing] || (acState.swing ? '擺動' : '停止');
+      document.getElementById('statLight').textContent = acState.panelLight ? '開啟' : '關閉';
+      document.getElementById('statEco').textContent = acState.ecoMode ? '開啟' : '關閉';
+      const presetText = acState.turboMode ? '強力' : acState.ecoMode ? 'ECO' : acState.sleepMode ? '睡眠' : '一般';
+      const presetEl = document.getElementById('statPreset');
+      if (presetEl) presetEl.textContent = presetText;
+      const timerOnEl = document.getElementById('statTimerOn');
+      if (timerOnEl) timerOnEl.textContent = acState.timerOnMinutes !== null ? `${acState.timerOnMinutes} 分` : '未設定';
+      const timerOffEl = document.getElementById('statTimerOff');
+      if (timerOffEl) timerOffEl.textContent = acState.timerOffMinutes !== null ? `${acState.timerOffMinutes} 分` : '未設定';
+      document.getElementById('dispLastAction').textContent = acState.lastActionText;
+
+      // 2. Physical Remote Control Screen
+      const tempInt = Math.floor(acState.targetTemp);
+      const tempDec = (acState.targetTemp % 1 >= 0.5) ? '.5' : '.0';
+      document.getElementById('lcdBigTemp').textContent = tempInt;
+      document.getElementById('lcdRoomTemp').textContent = acState.indoorTemp.toFixed(1);
+
+      const modeIcons = {
+        1: '<i class="fa-solid fa-arrows-rotate"></i> AUTO',
+        2: '<i class="fa-solid fa-snowflake"></i> COOL',
+        3: '<i class="fa-solid fa-droplet"></i> DRY',
+        4: '<i class="fa-solid fa-fire"></i> HEAT',
+        5: '<i class="fa-solid fa-fan"></i> FAN'
+      };
+      document.getElementById('lcdModeIcon').innerHTML = modeIcons[acState.mode] || 'COOL';
+      document.getElementById('lcdFanIcon').innerHTML = `<i class="fa-solid fa-wind"></i> ${FAN_NAMES[acState.fanSpeed] || 'AUTO'}`;
+      document.getElementById('lcdSwingIcon').style.opacity = acState.swing ? '1' : '0.2';
+      document.getElementById('lcdEcoTag').style.opacity = acState.ecoMode ? '1' : '0.2';
+      document.getElementById('lcdTurboTag').style.opacity = acState.turboMode ? '1' : '0.2';
+      document.getElementById('lcdLightTag').style.opacity = acState.panelLight ? '1' : '0.2';
+    }
+
+    function logToTerminal(tag, message, type = 'sys') {
+      const terminal = document.getElementById('terminalWindow');
+      const now = new Date();
+      const timeStr = now.toTimeString().split(' ')[0] + '.' + now.getMilliseconds().toString().padStart(3, '0');
+
+      const row = document.createElement('div');
+      row.className = "flex items-start gap-2.5 text-xs font-mono py-0.5 border-b border-slate-900/40";
+
+      let badge = '';
+      if (type === 'tx') {
+        badge = `<span class="bg-sky-500/20 text-sky-400 border border-sky-500/30 px-1.5 py-0.5 rounded text-[10px] font-bold">TX</span>`;
+      } else if (type === 'rx') {
+        badge = `<span class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded text-[10px] font-bold">RX</span>`;
+      } else if (type === 'err') {
+        badge = `<span class="bg-rose-500/20 text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded text-[10px] font-bold">ERR</span>`;
+      } else {
+        badge = `<span class="bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded text-[10px]">SYS</span>`;
+      }
+
+      row.innerHTML = `
+        <span class="text-slate-500 shrink-0 text-[11px]">${timeStr}</span>
+        ${badge}
+        <span class="${type === 'tx' ? 'text-sky-300' : type === 'rx' ? 'text-emerald-300' : type === 'err' ? 'text-rose-400' : 'text-slate-300'} break-all flex-1">${escapeHtml(message)}</span>
+      `;
+
+      terminal.appendChild(row);
+      terminal.scrollTop = terminal.scrollHeight;
+    }
+
+    function clearTerminal() {
+      document.getElementById('terminalWindow').innerHTML = '<div class="text-slate-500 italic">[System] UART Terminal 紀錄已清除。</div>';
+    }
+
+    function escapeHtml(text) {
+      return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    // Window Init
+    window.addEventListener('DOMContentLoaded', () => {
+      try {
+        refreshPortList();
+      } catch (err) {
+        console.warn('Initial port scan skipped:', err);
+      }
+      updateDashboardUI();
+      setInterval(tickAcTimers, 1000);
+    });
+  </script>
+</body>
+</html>

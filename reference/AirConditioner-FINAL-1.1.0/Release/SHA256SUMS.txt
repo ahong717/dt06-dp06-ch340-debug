@@ -1,0 +1,2 @@
+4fc5a5e2b4ef4c235db922c21c5410cfde44eaf8e77778fd366d6f43ad63f967  air-conditioner-final-ota.bin
+4fc5a5e2b4ef4c235db922c21c5410cfde44eaf8e77778fd366d6f43ad63f967  air-conditioner-final-factory.bin

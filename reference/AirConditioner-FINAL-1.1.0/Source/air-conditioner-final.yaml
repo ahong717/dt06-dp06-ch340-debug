@@ -1,0 +1,880 @@
+substitutions:
+  device_name: air-conditioner
+  friendly_name: 冷氣
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  name_add_mac_suffix: true
+  min_version: 2026.7.2
+  project:
+    name: community.air_conditioner_controller
+    version: "1.1.0"
+  platformio_options:
+    board_upload.flash_size: 2MB
+    board_build.ldscript: eagle.flash.2m1m.ld
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          auto *base = esphome::web_server_base::global_web_server_base;
+          if (base != nullptr && base->get_server() != nullptr) {
+            base->get_server()->on("/ZH", HTTP_GET, [](AsyncWebServerRequest *request) {
+              request->redirect("/?lang=zh");
+            });
+            base->get_server()->on("/zh", HTTP_GET, [](AsyncWebServerRequest *request) {
+              request->redirect("/?lang=zh");
+            });
+            base->get_server()->on("/m", HTTP_GET, [](AsyncWebServerRequest *request) {
+              request->redirect("/?mobile=1");
+            });
+            base->get_server()->on("/m/zh", HTTP_GET, [](AsyncWebServerRequest *request) {
+              request->redirect("/?mobile=1&lang=zh");
+            });
+          }
+      - if:
+          condition:
+            switch.is_on: beeper
+          then:
+            - midea_ac.beeper_on:
+          else:
+            - midea_ac.beeper_off:
+
+esp8266:
+  board: esp8285
+  restore_from_flash: true
+
+preferences:
+  flash_write_interval: 10min
+
+logger:
+  level: DEBUG
+  initial_level: INFO
+  baud_rate: 0
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  reboot_timeout: 15min
+  ap:
+    password: "12345678"
+    ap_timeout: 30s
+
+captive_portal:
+  compression: gzip
+
+time:
+  - platform: sntp
+    id: cloud_time
+    timezone: Asia/Taipei
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+output:
+  - platform: gpio
+    id: cloud_status_led
+    pin:
+      number: GPIO4
+      inverted: true
+
+firebase_sse:
+  id: firebase_cloud
+  name: Firebase Cloud Realtime Sync
+  icon: mdi:cloud-sync
+  entity_category: config
+  restore_mode: RESTORE_DEFAULT_OFF
+  api_key: "AIzaSyAuxjukZV-UVmX6adDLl9KWQB-aOlEQ5-Q"
+  database_url: "https://esp8266ac-1e0f0-default-rtdb.asia-southeast1.firebasedatabase.app"
+  climate_id: ac
+  status_led: cloud_status_led
+  status:
+    name: Firebase Realtime Sync Status
+    id: firebase_status
+    icon: mdi:cloud-check
+    entity_category: diagnostic
+  firebase_device_id:
+    name: Firebase Device ID
+    id: firebase_device_id
+    icon: mdi:identifier
+    entity_category: diagnostic
+  pairing_code:
+    name: Firebase Pairing Code
+    id: firebase_pairing_code
+    icon: mdi:numeric
+    entity_category: config
+  owner_email:
+    name: Firebase Owner Email
+    id: firebase_owner_email
+    icon: mdi:email-check
+    entity_category: config
+
+# CSS 與 JavaScript 在編譯時嵌入韌體，不依賴外部網站。
+web_server:
+  port: 80
+  version: 3
+  local: false
+  enable_private_network_access: true
+  allowed_origins:
+    - https://esp8266ac-1e0f0.web.app
+  css_url: ""
+  css_include: air-conditioner-final.css
+  js_url: ""
+  js_include: air-conditioner-final.js
+  log: true
+
+uart:
+  id: ac_uart
+  rx_pin: GPIO3
+  tx_pin: GPIO1
+  baud_rate: 9600
+
+climate:
+  - platform: midea
+    id: ac
+    name: Climate
+    uart_id: ac_uart
+    period: 1000ms
+    timeout: 3s
+    num_attempts: 3
+    autoconf: true
+    beeper: true
+    visual:
+      min_temperature: 16 °C
+      max_temperature: 30 °C
+      temperature_step: 1 °C
+    supported_modes:
+      - HEAT_COOL
+      - COOL
+      - HEAT
+      - FAN_ONLY
+      - DRY
+    custom_fan_modes:
+      - SILENT
+      - TURBO
+    supported_presets:
+      - ECO
+      - BOOST
+      - SLEEP
+    custom_presets:
+      - FREEZE_PROTECTION
+    supported_swing_modes:
+      - VERTICAL
+      - HORIZONTAL
+      - BOTH
+    outdoor_temperature:
+      name: Outdoor Temperature
+      id: outdoor_temperature
+      filters:
+        - lambda: |-
+            // 排除通訊未回覆值、已知 102°C 異常值、不合理範圍與單次劇烈跳動。
+            if (!std::isfinite(x) || x < -40.0f || x > 70.0f || fabsf(x - 102.0f) < 0.1f) {
+              return NAN;
+            }
+            static float previous_valid = NAN;
+            if (std::isfinite(previous_valid) && fabsf(x - previous_valid) > 15.0f) {
+              previous_valid = x;
+              return NAN;
+            }
+            previous_valid = x;
+            return x;
+    on_state:
+      - script.execute: handle_mildew_state_change
+      - script.execute: handle_timer_state_change
+
+switch:
+  # Midea 原廠協定支援蜂鳴回饋時，可由本地頁面與 Home Assistant 開關。
+  # optimistic 是必要取捨：此協定只送出設定命令，不會回報蜂鳴器實際狀態。
+  - platform: template
+    name: Beeper
+    id: beeper
+    icon: mdi:volume-source
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    entity_category: config
+    turn_on_action:
+      - midea_ac.beeper_on:
+    turn_off_action:
+      - midea_ac.beeper_off:
+
+  # 冷氣面板顯示燈。Midea 指令是 toggle；此開關狀態以 ESPHome 為準。
+  - platform: template
+    name: Display Light
+    id: display_light
+    icon: mdi:led-on
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action:
+      - midea_ac.display_toggle:
+    turn_off_action:
+      - midea_ac.display_toggle:
+
+  - platform: template
+    name: Mildew Proof Auto
+    id: mildew_auto
+    icon: mdi:air-filter
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    entity_category: config
+
+button:
+  - platform: template
+    name: Regenerate Firebase Pairing Code
+    id: regenerate_firebase_pairing
+    icon: mdi:refresh
+    entity_category: config
+    on_press:
+      - lambda: id(firebase_cloud).regenerate_pairing_code();
+
+  - platform: template
+    name: Remove Firebase Cloud Owner
+    id: remove_firebase_owner
+    icon: mdi:account-remove
+    entity_category: config
+    on_press:
+      - lambda: id(firebase_cloud).clear_cloud_owner();
+
+  - platform: template
+    name: Swing Step
+    icon: mdi:tailwind
+    on_press:
+      - midea_ac.swing_step:
+
+  - platform: template
+    name: Start Mildew Proof
+    icon: mdi:shield-check
+    on_press:
+      - script.execute: start_mildew_now
+
+  - platform: template
+    name: Mildew Power Off
+    icon: mdi:power-sleep
+    on_press:
+      - script.execute: smart_power_off
+
+  - platform: template
+    name: Cancel Mildew Proof
+    icon: mdi:shield-remove
+    on_press:
+      - script.execute: cancel_mildew
+
+  - platform: template
+    name: 倒數後開機 ON
+    icon: mdi:power-on
+    on_press:
+      - lambda: id(countdown_action_code) = 1;
+      - script.execute: start_countdown
+
+  - platform: template
+    name: 倒數後關機 OFF
+    icon: mdi:power-off
+    on_press:
+      - lambda: id(countdown_action_code) = 2;
+      - script.execute: start_countdown
+
+  - platform: template
+    name: Cancel Countdown
+    icon: mdi:timer-cancel-outline
+    on_press:
+      - script.execute: cancel_countdown
+
+  - platform: restart
+    name: Restart
+    entity_category: diagnostic
+
+  - platform: factory_reset
+    id: raw_factory_reset
+    internal: true
+
+  - platform: template
+    name: Factory Reset
+    entity_category: config
+    disabled_by_default: true
+    on_press:
+      - lambda: id(firebase_cloud).clear_cloud_owner();
+      - delay: 2s
+      - button.press: raw_factory_reset
+
+number:
+  - platform: template
+    name: Mildew Proof Duration
+    id: mildew_duration
+    icon: mdi:fan-clock
+    unit_of_measurement: min
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 30
+    min_value: 15
+    max_value: 90
+    step: 1
+    entity_category: config
+
+  - platform: template
+    name: Mildew Proof Start Delay
+    id: mildew_start_delay
+    icon: mdi:timer-outline
+    unit_of_measurement: s
+    mode: box
+    optimistic: true
+    restore_value: true
+    initial_value: 3
+    min_value: 1
+    max_value: 10
+    step: 1
+    entity_category: config
+
+  # 倒數欄位全部不寫入 Flash；每次排程成功後會立即清回 0。
+  - platform: template
+    name: Countdown Minutes
+    id: countdown_minutes
+    icon: mdi:timer-outline
+    unit_of_measurement: min
+    mode: box
+    optimistic: true
+    restore_value: false
+    initial_value: 0
+    min_value: 0
+    max_value: 999
+    step: 1
+
+select:
+  - platform: logger
+    name: 診斷日誌等級
+    entity_category: diagnostic
+
+  - platform: template
+    name: Countdown ON Mode
+    id: countdown_on_mode
+    icon: mdi:air-conditioner
+    optimistic: true
+    restore_value: false
+    initial_option: 未選擇
+    options:
+      - 未選擇
+      - 自動
+      - 冷氣
+      - 暖氣
+      - 送風
+      - 除濕
+
+  - platform: template
+    name: Countdown ON Temperature
+    id: countdown_on_temperature
+    icon: mdi:thermometer
+    optimistic: true
+    restore_value: false
+    initial_option: 未選擇
+    options:
+      - 未選擇
+      - "16"
+      - "17"
+      - "18"
+      - "19"
+      - "20"
+      - "21"
+      - "22"
+      - "23"
+      - "24"
+      - "25"
+      - "26"
+      - "27"
+      - "28"
+      - "29"
+      - "30"
+
+  - platform: template
+    name: Countdown ON Fan
+    id: countdown_on_fan
+    icon: mdi:fan
+    optimistic: true
+    restore_value: false
+    initial_option: 未選擇
+    options:
+      - 未選擇
+      - 自動
+      - 低
+      - 中
+      - 高
+      - 靜音
+      - 強力
+
+sensor:
+  - platform: template
+    name: Indoor Temperature
+    id: indoor_temperature
+    device_class: temperature
+    state_class: measurement
+    unit_of_measurement: °C
+    accuracy_decimals: 1
+    update_interval: 5s
+    lambda: |-
+      if (isnan(id(ac).current_temperature)) return {};
+      return id(ac).current_temperature;
+
+  - platform: template
+    name: Target Temperature
+    id: target_temperature
+    device_class: temperature
+    unit_of_measurement: °C
+    accuracy_decimals: 1
+    update_interval: 5s
+    lambda: |-
+      if (isnan(id(ac).target_temperature)) return {};
+      return id(ac).target_temperature;
+
+  - platform: wifi_signal
+    name: WiFi Signal
+    update_interval: 60s
+    entity_category: diagnostic
+
+  - platform: uptime
+    name: Uptime
+    entity_category: diagnostic
+
+binary_sensor:
+  - platform: template
+    name: Mildew Proof Status
+    id: mildew_status
+    icon: mdi:shield-check
+    lambda: return id(mildew_active);
+
+  - platform: template
+    name: Mildew Proof Delay Status
+    id: mildew_delay_status
+    icon: mdi:timer-sand
+    lambda: return id(mildew_delay_active);
+
+  - platform: template
+    name: Countdown Active
+    id: countdown_status
+    icon: mdi:timer-sand
+    lambda: return id(countdown_active);
+
+text_sensor:
+  - platform: template
+    name: Mildew Proof Countdown
+    icon: mdi:timer-outline
+    update_interval: 1s
+    lambda: |-
+      if (!id(mildew_active)) return std::string("");
+      const uint32_t elapsed = (millis() - id(mildew_started_ms)) / 1000;
+      const int total = (int) (id(mildew_duration).state * 60);
+      const int remaining = total - (int) elapsed;
+      if (remaining <= 0) return std::string("00:00");
+      char value[16];
+      snprintf(value, sizeof(value), "%02d:%02d", remaining / 60, remaining % 60);
+      return std::string(value);
+
+  - platform: template
+    name: Countdown Remaining
+    icon: mdi:timer-sand
+    update_interval: 1s
+    lambda: |-
+      if (!id(countdown_active)) return std::string("");
+      const int32_t remaining_ms = (int32_t) (id(countdown_end_ms) - millis());
+      if (remaining_ms <= 0) return std::string("00:00:00");
+      const uint32_t remaining = (uint32_t) remaining_ms / 1000;
+      char value[24];
+      snprintf(value, sizeof(value), "%02u:%02u:%02u",
+               remaining / 3600, (remaining % 3600) / 60, remaining % 60);
+      return std::string(value);
+
+  - platform: template
+    name: Countdown Status
+    icon: mdi:information-outline
+    update_interval: 1s
+    lambda: |-
+      if (!id(countdown_active)) return std::string("未設定");
+      return id(countdown_action_code) == 1
+        ? std::string("等待定時開機")
+        : std::string("等待定時關機");
+
+  - platform: template
+    name: Countdown Plan
+    icon: mdi:clipboard-clock-outline
+    update_interval: 1s
+    lambda: |-
+      if (!id(countdown_active)) return std::string("");
+      if (id(countdown_action_code) == 2) return std::string("OFF");
+
+      const char *mode =
+        id(countdown_mode_code) == 1 ? "HEAT_COOL" :
+        id(countdown_mode_code) == 2 ? "COOL" :
+        id(countdown_mode_code) == 3 ? "HEAT" :
+        id(countdown_mode_code) == 4 ? "FAN_ONLY" : "DRY";
+      const char *fan =
+        id(countdown_fan_code) == 1 ? "AUTO" :
+        id(countdown_fan_code) == 2 ? "LOW" :
+        id(countdown_fan_code) == 3 ? "MEDIUM" :
+        id(countdown_fan_code) == 4 ? "HIGH" :
+        id(countdown_fan_code) == 5 ? "Silent" : "Turbo";
+
+      char value[64];
+      if (id(countdown_mode_code) == 4) {
+        snprintf(value, sizeof(value), "ON|%s|-|%s", mode, fan);
+      } else {
+        snprintf(value, sizeof(value), "ON|%s|%.0f|%s",
+                 mode, id(countdown_temperature_value), fan);
+      }
+      return std::string(value);
+
+  - platform: version
+    name: ESPHome Version
+    entity_category: diagnostic
+
+  - platform: wifi_info
+    ip_address:
+      name: IP Address
+      entity_category: diagnostic
+    ssid:
+      name: WiFi SSID
+      entity_category: diagnostic
+
+globals:
+  - id: previous_ac_mode
+    type: ClimateMode
+    initial_value: CLIMATE_MODE_OFF
+
+  - id: mildew_active
+    type: bool
+    initial_value: "false"
+
+  - id: mildew_delay_active
+    type: bool
+    initial_value: "false"
+
+  - id: mildew_internal_action
+    type: bool
+    initial_value: "false"
+
+  - id: mildew_started_ms
+    type: uint32_t
+    initial_value: "0"
+
+  - id: countdown_active
+    type: bool
+    initial_value: "false"
+
+  - id: countdown_internal_action
+    type: bool
+    initial_value: "false"
+
+  - id: countdown_seconds
+    type: uint32_t
+    initial_value: "0"
+
+  - id: countdown_end_ms
+    type: uint32_t
+    initial_value: "0"
+
+  # 0=未設定，1=開機，2=關機
+  - id: countdown_action_code
+    type: int
+    initial_value: "0"
+
+  - id: countdown_mode_code
+    type: int
+    initial_value: "0"
+
+  - id: countdown_temperature_value
+    type: float
+    initial_value: "27.0"
+
+  - id: countdown_fan_code
+    type: int
+    initial_value: "0"
+
+script:
+  - id: handle_mildew_state_change
+    mode: restart
+    then:
+      - lambda: |-
+          const ClimateMode current = id(ac).mode;
+          if (id(mildew_internal_action)) {
+            id(mildew_internal_action) = false;
+            id(previous_ac_mode) = current;
+            return;
+          }
+
+          if (id(mildew_active) && current != CLIMATE_MODE_FAN_ONLY) {
+            id(mildew_active) = false;
+            id(mildew_process).stop();
+          }
+          if (id(mildew_delay_active) && current != CLIMATE_MODE_OFF) {
+            id(mildew_delay_active) = false;
+            id(mildew_delay_process).stop();
+          }
+
+          const ClimateMode previous = id(previous_ac_mode);
+          id(previous_ac_mode) = current;
+          const bool needs_drying =
+            previous == CLIMATE_MODE_COOL ||
+            previous == CLIMATE_MODE_DRY ||
+            previous == CLIMATE_MODE_HEAT_COOL;
+
+          if (current == CLIMATE_MODE_OFF &&
+              previous != CLIMATE_MODE_OFF &&
+              needs_drying &&
+              id(mildew_auto).state &&
+              !id(mildew_active) &&
+              !id(mildew_delay_active)) {
+            id(mildew_delay_process).execute();
+          }
+
+  - id: mildew_delay_process
+    mode: restart
+    then:
+      - lambda: id(mildew_delay_active) = true;
+      - delay: !lambda return (uint32_t) (id(mildew_start_delay).state * 1000);
+      - if:
+          condition:
+            lambda: return id(mildew_delay_active) && id(ac).mode == CLIMATE_MODE_OFF;
+          then:
+            - lambda: id(mildew_delay_active) = false;
+            - script.execute: mildew_process
+
+  - id: start_mildew_now
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return !id(mildew_active) &&
+                     !id(mildew_delay_active) &&
+                     (id(ac).mode == CLIMATE_MODE_COOL ||
+                      id(ac).mode == CLIMATE_MODE_DRY ||
+                      id(ac).mode == CLIMATE_MODE_HEAT_COOL ||
+                      id(ac).mode == CLIMATE_MODE_FAN_ONLY);
+          then:
+            - script.execute: mildew_process
+
+  - id: smart_power_off
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: return id(mildew_active) || id(mildew_delay_active);
+          then:
+            - lambda: |-
+                ESP_LOGI("smart_power_off", "Mildew cycle already active; power-off request ignored.");
+          else:
+            - if:
+                condition:
+                  lambda: |-
+                    return id(mildew_auto).state &&
+                           (id(ac).mode == CLIMATE_MODE_COOL ||
+                            id(ac).mode == CLIMATE_MODE_DRY ||
+                            id(ac).mode == CLIMATE_MODE_HEAT_COOL);
+                then:
+                  - script.execute: mildew_process
+                else:
+                  - if:
+                      condition:
+                        lambda: return id(ac).mode != CLIMATE_MODE_OFF;
+                      then:
+                        - lambda: |-
+                            auto call = id(ac).make_call();
+                            call.set_mode(CLIMATE_MODE_OFF);
+                            call.perform();
+
+  - id: immediate_power_off
+    mode: restart
+    then:
+      - lambda: |-
+          id(mildew_active) = false;
+          id(mildew_delay_active) = false;
+          id(mildew_process).stop();
+          id(mildew_delay_process).stop();
+          if (id(ac).mode != CLIMATE_MODE_OFF) {
+            id(mildew_internal_action) = true;
+            auto call = id(ac).make_call();
+            call.set_mode(CLIMATE_MODE_OFF);
+            call.perform();
+          }
+
+  - id: mildew_process
+    mode: single
+    then:
+      - lambda: |-
+          id(mildew_active) = true;
+          id(mildew_started_ms) = millis();
+          id(mildew_internal_action) = true;
+          auto call = id(ac).make_call();
+          call.set_mode(CLIMATE_MODE_FAN_ONLY);
+          call.set_fan_mode(CLIMATE_FAN_HIGH);
+          call.perform();
+      - delay: !lambda return (uint32_t) (id(mildew_duration).state * 60000);
+      - if:
+          condition:
+            lambda: return id(mildew_active);
+          then:
+            - lambda: |-
+                id(mildew_active) = false;
+                id(mildew_internal_action) = true;
+                auto call = id(ac).make_call();
+                call.set_mode(CLIMATE_MODE_OFF);
+                call.perform();
+
+  - id: cancel_mildew
+    mode: restart
+    then:
+      - lambda: |-
+          const bool was_active = id(mildew_active);
+          id(mildew_active) = false;
+          id(mildew_delay_active) = false;
+          id(mildew_process).stop();
+          id(mildew_delay_process).stop();
+          if (was_active) {
+            id(mildew_internal_action) = true;
+            auto call = id(ac).make_call();
+            call.set_mode(CLIMATE_MODE_OFF);
+            call.perform();
+          }
+
+  - id: start_countdown
+    mode: single
+    then:
+      - lambda: |-
+          if (id(countdown_active)) {
+            ESP_LOGW("countdown", "A countdown is already active");
+            return;
+          }
+
+          const int action = id(countdown_action_code);
+          const uint32_t seconds = (uint32_t) id(countdown_minutes).state * 60U;
+          if ((action != 1 && action != 2) || seconds == 0) {
+            id(countdown_action_code) = 0;
+            ESP_LOGW("countdown", "Duration must be greater than zero");
+            return;
+          }
+
+          if (action == 1) {
+            if (id(ac).mode != CLIMATE_MODE_OFF) {
+              id(countdown_action_code) = 0;
+              ESP_LOGW("countdown", "Timed ON is allowed only while AC is OFF");
+              return;
+            }
+            std::string mode = std::string(id(countdown_on_mode).current_option());
+            const std::string temperature = std::string(id(countdown_on_temperature).current_option());
+            const std::string fan = std::string(id(countdown_on_fan).current_option());
+            if (mode == "未選擇") {
+              mode = "送風";
+              ESP_LOGI("countdown", "Timed ON mode not selected; using FAN_ONLY");
+            }
+
+            if (mode == "自動") id(countdown_mode_code) = 1;
+            else if (mode == "冷氣") id(countdown_mode_code) = 2;
+            else if (mode == "暖氣") id(countdown_mode_code) = 3;
+            else if (mode == "送風") id(countdown_mode_code) = 4;
+            else id(countdown_mode_code) = 5;
+
+            if (mode != "送風") {
+              if (temperature != "未選擇") {
+                id(countdown_temperature_value) = atof(temperature.c_str());
+              } else {
+                float fallback_temperature = id(ac).current_temperature;
+                if (!std::isfinite(fallback_temperature)) fallback_temperature = 27.0f;
+                fallback_temperature = roundf(fallback_temperature);
+                if (fallback_temperature < 16.0f) fallback_temperature = 16.0f;
+                if (fallback_temperature > 30.0f) fallback_temperature = 30.0f;
+                id(countdown_temperature_value) = fallback_temperature;
+                ESP_LOGI("countdown", "Timed ON temperature not selected; using room temperature or 27C fallback");
+              }
+            }
+            if (fan == "未選擇") {
+              id(countdown_fan_code) = 3;
+              ESP_LOGI("countdown", "Timed ON fan not selected; using MEDIUM");
+            } else if (fan == "自動") id(countdown_fan_code) = 1;
+            else if (fan == "低") id(countdown_fan_code) = 2;
+            else if (fan == "中") id(countdown_fan_code) = 3;
+            else if (fan == "高") id(countdown_fan_code) = 4;
+            else if (fan == "靜音") id(countdown_fan_code) = 5;
+            else id(countdown_fan_code) = 6;
+          } else {
+            if (id(ac).mode == CLIMATE_MODE_OFF) {
+              id(countdown_action_code) = 0;
+              ESP_LOGW("countdown", "Timed OFF is allowed only while AC is running");
+              return;
+            }
+          }
+
+          id(countdown_seconds) = seconds;
+          id(countdown_end_ms) = millis() + seconds * 1000U;
+          id(countdown_active) = true;
+
+          // 排程成立後立刻清除全部輸入，避免下次沿用。
+          id(countdown_minutes).publish_state(0);
+          id(countdown_on_mode).publish_state("未選擇");
+          id(countdown_on_temperature).publish_state("未選擇");
+          id(countdown_on_fan).publish_state("未選擇");
+          id(countdown_process).execute();
+
+  - id: countdown_process
+    mode: restart
+    then:
+      - delay: !lambda return id(countdown_seconds) * 1000U;
+      - if:
+          condition:
+            lambda: return id(countdown_active);
+          then:
+            - lambda: |-
+                const int action = id(countdown_action_code);
+                id(countdown_active) = false;
+                id(countdown_action_code) = 0;
+                id(countdown_internal_action) = true;
+                auto call = id(ac).make_call();
+                if (action == 2) {
+                  call.set_mode(CLIMATE_MODE_OFF);
+                } else {
+                  if (id(countdown_mode_code) == 1) call.set_mode(CLIMATE_MODE_HEAT_COOL);
+                  else if (id(countdown_mode_code) == 2) call.set_mode(CLIMATE_MODE_COOL);
+                  else if (id(countdown_mode_code) == 3) call.set_mode(CLIMATE_MODE_HEAT);
+                  else if (id(countdown_mode_code) == 4) call.set_mode(CLIMATE_MODE_FAN_ONLY);
+                  else call.set_mode(CLIMATE_MODE_DRY);
+                  if (id(countdown_mode_code) != 4) {
+                    call.set_target_temperature(id(countdown_temperature_value));
+                  }
+                  if (id(countdown_fan_code) == 1) call.set_fan_mode(CLIMATE_FAN_AUTO);
+                  else if (id(countdown_fan_code) == 2) call.set_fan_mode(CLIMATE_FAN_LOW);
+                  else if (id(countdown_fan_code) == 3) call.set_fan_mode(CLIMATE_FAN_MEDIUM);
+                  else if (id(countdown_fan_code) == 4) call.set_fan_mode(CLIMATE_FAN_HIGH);
+                  else if (id(countdown_fan_code) == 5) call.set_fan_mode("Silent");
+                  else call.set_fan_mode("Turbo");
+                }
+                call.perform();
+
+  - id: cancel_countdown
+    mode: restart
+    then:
+      - lambda: |-
+          id(countdown_active) = false;
+          id(countdown_action_code) = 0;
+          id(countdown_process).stop();
+          id(countdown_minutes).publish_state(0);
+          id(countdown_on_mode).publish_state("未選擇");
+          id(countdown_on_temperature).publish_state("未選擇");
+          id(countdown_on_fan).publish_state("未選擇");
+
+  - id: handle_timer_state_change
+    mode: restart
+    then:
+      - lambda: |-
+          if (id(countdown_internal_action)) {
+            id(countdown_internal_action) = false;
+            return;
+          }
+          if (!id(countdown_active)) return;
+          const bool reached_early =
+            (id(countdown_action_code) == 1 && id(ac).mode != CLIMATE_MODE_OFF) ||
+            (id(countdown_action_code) == 2 && id(ac).mode == CLIMATE_MODE_OFF);
+          if (reached_early) {
+            id(countdown_active) = false;
+            id(countdown_action_code) = 0;
+            id(countdown_process).stop();
+          }

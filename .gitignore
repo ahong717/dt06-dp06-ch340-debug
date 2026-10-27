@@ -1,0 +1,10 @@
+# Generated build output and local tool caches
+build-cache/
+__pycache__/
+*.py[cod]
+
+# Local IDE / OS files
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini

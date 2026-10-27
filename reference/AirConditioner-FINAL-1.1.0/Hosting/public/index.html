@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+    <meta name="theme-color" content="#f2f6f8">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <title>ESP8266AC Remote</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/icon.svg">
+    <link rel="stylesheet" href="/app.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section id="auth-view" class="auth-layout">
+        <div class="brand-block">
+          <span class="eyebrow">ESP8266AC</span>
+          <h1>回家前，先把空氣調舒服。</h1>
+          <p>登入自己的 AC Cloud 帳號，就能在任何手機查看與控制已配對的 DT‑06。</p>
+        </div>
+
+        <div class="auth-card">
+          <div class="segmented" role="tablist" aria-label="帳號操作">
+            <button id="show-login" class="active" type="button">登入</button>
+            <button id="show-register" type="button">註冊</button>
+          </div>
+          <form id="auth-form">
+            <label>Email
+              <input id="email" type="email" autocomplete="email" required>
+            </label>
+            <label>AC Cloud 密碼
+              <input id="password" type="password" minlength="6" autocomplete="current-password" required>
+            </label>
+            <label id="confirm-row" hidden>再次輸入密碼
+              <input id="password-confirm" type="password" minlength="6" autocomplete="new-password">
+            </label>
+            <p class="hint">這是你為冷氣帳號建立的新密碼，不是 Google 或 Email 信箱密碼。</p>
+            <button id="auth-submit" class="primary" type="submit">登入</button>
+          </form>
+          <button id="forgot-password" class="text-button" type="button">忘記密碼</button>
+          <p id="auth-message" class="message" role="status"></p>
+        </div>
+      </section>
+
+      <section id="app-view" hidden>
+        <header class="topbar">
+          <div>
+            <span class="eyebrow">ESP8266AC REMOTE</span>
+            <h1 id="device-title">我的冷氣</h1>
+          </div>
+          <div class="top-actions">
+            <span id="connection-chip" class="chip offline">未連線</span>
+            <button id="account-button" class="icon-button" type="button" aria-label="帳號與設定">⚙</button>
+          </div>
+        </header>
+
+        <section id="empty-state" class="empty-state" hidden>
+          <div class="empty-icon" aria-hidden="true">＋</div>
+          <h2>新增第一台冷氣</h2>
+          <p>先連上 DT‑06 的本機網頁，在設定頁找到裝置 ID 與八位數配對碼。</p>
+          <button id="open-pairing" class="primary" type="button">新增冷氣</button>
+        </section>
+
+        <section id="control-view" class="control-layout" hidden>
+          <article class="hero-card">
+            <div class="air-unit" aria-hidden="true"><span></span><i></i><i></i><i></i></div>
+            <div class="status-copy">
+              <span id="running-label">冷氣已關閉</span>
+              <strong><span id="target-temperature">26</span><small>°C</small></strong>
+              <p>室內 <span id="room-temperature">—</span>°C</p>
+            </div>
+            <div class="temperature-control" aria-label="設定溫度">
+              <button id="temp-down" type="button" aria-label="降低一度">−</button>
+              <span>設定溫度</span>
+              <button id="temp-up" type="button" aria-label="升高一度">＋</button>
+            </div>
+          </article>
+
+          <article class="quick-card">
+            <div class="section-heading">
+              <div><span class="eyebrow">QUICK CONTROL</span><h2>常用操作</h2></div>
+              <button id="add-device" class="text-button" type="button">新增裝置</button>
+            </div>
+            <div class="mode-grid" role="group" aria-label="運轉模式">
+              <button type="button" data-mode="COOL" class="active"><span>❄</span>冷房</button>
+              <button type="button" data-mode="HEAT_COOL"><span>◉</span>自動</button>
+              <button type="button" data-mode="DRY"><span>◇</span>除濕</button>
+              <button type="button" data-mode="FAN_ONLY"><span>✣</span>送風</button>
+              <button type="button" data-mode="HEAT"><span>H</span>暖氣</button>
+              <button type="button" data-mode="OFF" class="mode-off"><span>⏻</span>關閉</button>
+            </div>
+            <div class="state-row">
+              <span>目前模式</span><strong id="mode-value">—</strong>
+            </div>
+            <div class="state-row">
+              <span>最後同步</span><strong id="updated-value">—</strong>
+            </div>
+          </article>
+        </section>
+
+        <dialog id="pairing-dialog">
+          <form id="pairing-form" method="dialog">
+            <div class="dialog-heading">
+              <div><span class="eyebrow">PAIR DT‑06</span><h2>新增冷氣</h2></div>
+              <button class="icon-button close-dialog" type="button" aria-label="關閉">×</button>
+            </div>
+            <label>裝置 ID
+              <input id="pair-device-id" autocomplete="off" spellcheck="false" required>
+            </label>
+            <label>八位數配對碼
+              <input id="pair-code" inputmode="numeric" pattern="[0-9]{8}" maxlength="8" autocomplete="one-time-code" required>
+            </label>
+            <p class="hint">配對碼產生後十分鐘內有效，而且只能在尚未有主人的裝置使用。</p>
+            <button class="primary" type="submit">完成配對</button>
+            <p id="pair-message" class="message" role="status"></p>
+          </form>
+        </dialog>
+
+        <dialog id="account-dialog">
+          <div class="dialog-heading">
+            <div><span class="eyebrow">ACCOUNT</span><h2>帳號與裝置</h2></div>
+            <button class="icon-button close-dialog" type="button" aria-label="關閉">×</button>
+          </div>
+          <div class="account-email"><span>登入 Email</span><strong id="account-email">—</strong></div>
+          <p id="verify-notice" class="notice" hidden>
+            Email 尚未驗證。完成驗證後才能綁定新裝置。
+            <button id="resend-verification" class="text-button" type="button">重寄驗證信</button>
+          </p>
+          <label>切換裝置
+            <select id="device-select"></select>
+          </label>
+          <button id="remove-device" class="danger-button" type="button">解除這台冷氣的雲端綁定</button>
+          <button id="logout" class="secondary" type="button">登出</button>
+          <p id="account-message" class="message" role="status"></p>
+        </dialog>
+
+        <p id="app-message" class="toast" role="status" hidden></p>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

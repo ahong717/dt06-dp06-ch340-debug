@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Air Conditioner Controller FINAL Preview</title>
+  <link rel="stylesheet" href="air-conditioner-final.css">
+  <style>
+    html.force-dark {
+      color-scheme:dark;
+      --bg:#080808; --card:#171717; --text:#dedbd5; --muted:#99958e;
+      --line:#35322e; --panel:#24211d; --active:#625b51; --active-text:#f0ebe2;
+    }
+    html.force-dark button,
+    html.force-dark select { background:#1c1c1c }
+    html.force-dark button.active {
+      background:var(--active); color:var(--active-text);
+    }
+  </style>
+  <script>
+    if (new URLSearchParams(location.search).get("theme") === "dark") {
+      document.documentElement.classList.add("force-dark");
+    }
+    const previewClimate = {name_id:"climate-Climate",mode:"OFF",target_temperature:26,current_temperature:27,fan_mode:"MEDIUM",swing_mode:"VERTICAL"};
+    const previewStreams = [];
+    class MockEventSource {
+      constructor() {
+        this.listeners = {};
+        previewStreams.push(this);
+        setTimeout(() => {
+          this.emit("open", {});
+          [
+            previewClimate,
+            {name_id:"sensor-Outdoor Temperature",value:31.5},
+            {name_id:"sensor-Indoor Temperature",value:27},
+            {name_id:"sensor-Target Temperature",value:26},
+            {name_id:"switch-Display Light",value:true},
+            {name_id:"switch-Mildew Proof Auto",value:true},
+            {name_id:"number-Mildew Proof Duration",value:30},
+            {name_id:"number-Mildew Proof Start Delay",value:1},
+            {name_id:"binary_sensor-Mildew Proof Status",value:false},
+            {name_id:"binary_sensor-Mildew Proof Delay Status",value:false},
+            {name_id:"text_sensor-Mildew Proof Countdown",state:""},
+            {name_id:"text_sensor-Countdown Remaining",state:""},
+            {name_id:"text_sensor-Countdown Status",state:"未設定"},
+            {name_id:"text_sensor-Countdown Plan",state:""},
+            {name_id:"select-診斷日誌等級",value:"INFO"}
+          ].forEach(data => this.emit("state", {data:JSON.stringify(data)}));
+        }, 30);
+      }
+      addEventListener(type, callback) {
+        (this.listeners[type] ||= []).push(callback);
+      }
+      emit(type, event) {
+        (this.listeners[type] || []).forEach(callback => callback(event));
+      }
+    }
+    window.EventSource = MockEventSource;
+    window.fetch = async input => {
+      const url = new URL(input, location.href);
+      if (url.pathname === "/climate/Climate/set") {
+        for (const key of ["mode", "fan_mode", "target_temperature", "swing_mode"]) {
+          if (url.searchParams.has(key)) {
+            previewClimate[key] = key === "target_temperature"
+              ? Number(url.searchParams.get(key))
+              : url.searchParams.get(key);
+          }
+        }
+        setTimeout(() => previewStreams.forEach(stream => stream.emit("state", {
+          data: JSON.stringify(previewClimate)
+        })), 20);
+      }
+      return {ok:true,json:async()=>previewClimate};
+    };
+  </script>
+</head>
+<body>
+  <script src="air-conditioner-final.js"></script>
+</body>
+</html>
