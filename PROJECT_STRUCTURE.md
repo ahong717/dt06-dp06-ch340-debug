@@ -1,33 +1,26 @@
 # DT-06 三洋冷氣 UART 模擬器｜專案結構
 
-## 交付內容
+```text
+dt06-dp06-ch340-debug/
+├─ README.md                         # GitHub 首頁入口
+├─ docs/                             # 分角色的詳細說明
+│  ├─ USER-GUIDE.md                  # 一般使用者、EXE、CH340
+│  ├─ DEVELOPER-GUIDE.md             # 新電腦、測試、建置
+│  └─ HARDWARE-TEST.md               # DT-06 + CH340 實機驗證
+├─ simulator-desktop/                # Python 桌面模擬器
+│  ├─ app.py                         # 介面與串列埠事件
+│  ├─ ac_emulator.py                 # 虛擬冷氣與穩定度狀態機
+│  ├─ midea_protocol.py              # UART 編解碼核心
+│  ├─ run.ps1 / run-tests.ps1        # .venv 啟動與測試
+├─ simulator-web/                    # 獨立 Web Serial 網頁版
+├─ tests/                            # 不接硬體即可跑的自動測試
+├─ reference/                        # FINAL 韌體與參考文件
+├─ firmware-source/                  # 韌體原始碼副本
+├─ setup-dev.bat / build-exe.bat     # 建環境與建置 EXE
+├─ requirements-dev.txt              # 開發依賴
+├─ DT06_三洋冷氣模擬器.exe            # 已交付執行檔
+└─ .gitignore                        # 排除環境、快取、建置產物
+```
 
-- `DT06_三洋冷氣模擬器.exe`：Windows 使用者直接執行的桌面模擬器。
-- `README.md`：啟動與操作說明。
-
-## 可維護原始碼
-
-- `simulator-desktop/app.py`：視窗、CH340 串列埠與事件顯示。
-- `simulator-desktop/ac_emulator.py`：虛擬冷氣狀態機。
-- `simulator-desktop/midea_protocol.py`：Midea/Sanyo UART 封包編解碼；已驗證的核心通訊檔案。
-- `simulator-desktop/run.ps1`：開發模式啟動腳本。
-- `requirements-dev.txt`：開發工具與套件清單，每行都有用途註解。
-- `setup-dev.bat`：雙擊建立 `.venv`、安裝套件並執行測試。
-- `build-exe.bat`：雙擊將桌面版原始碼編譯成 EXE。
-- `tests/`：自動測試。
-
-## 獨立網頁版
-
-- `simulator-web/dt06_ac_simulator.html`：使用瀏覽器 Web Serial 的獨立網頁模擬器。
-
-## 韌體參考
-
-- `reference/AirConditioner-FINAL-1.1.0/`：FINAL 韌體、文件與 Release 檔案。
-- `firmware-source/`：開發時使用的韌體原始碼副本；不要與 `reference` 混用。
-
-## 不納入 Git 版本的建置快取
-
-- `build-cache/`：PyInstaller 建置產物、建置工具、PlatformIO 套件與 Python 快取。
-- `build-output/`：每次重新編譯產生的新 EXE，不納入 Git 版本。
-
-這些檔案可以重新產生，不是模擬器執行所需的產品原始碼。
+`.venv/`、`build-cache/`、`build-output/`、Python 快取及 PlatformIO 快取不是產品原始碼，
+可由腳本或工具重新建立，因此不納入 Git。網頁版與桌面版是兩個獨立程式。

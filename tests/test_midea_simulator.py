@@ -4,7 +4,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "simulator-desktop"))
 
-from ac_emulator import VirtualAirConditioner, decode_timer, encode_timer
+from ac_emulator import StabilityCycle, VirtualAirConditioner, decode_timer, encode_timer
 from midea_protocol import (
     DEVICE_CONTROL,
     DEVICE_QUERY,
@@ -99,6 +99,19 @@ class EmulatorTests(unittest.TestCase):
         self.assertEqual(action.name, "能力查詢")
         self.assertEqual(capabilities.body[0], 0xB5)
         self.assertGreaterEqual(capabilities.body[1], 8)
+
+    def test_stability_cycle_waits_for_dt06_off_before_next_round(self):
+        cycle = StabilityCycle(10)
+        cycle.start()
+        self.assertEqual(cycle.state, StabilityCycle.COOLING)
+        self.assertIsNone(cycle.advance(9))
+        self.assertEqual(cycle.advance(1), "remote_off")
+        self.assertEqual(cycle.state, StabilityCycle.WAITING_DT06)
+        self.assertTrue(cycle.observe_dt06_off())
+        self.assertEqual(cycle.completed_rounds, 1)
+        cycle.begin_next_round()
+        self.assertEqual(cycle.round_number, 2)
+        self.assertEqual(cycle.state, StabilityCycle.COOLING)
 
 
 if __name__ == "__main__":

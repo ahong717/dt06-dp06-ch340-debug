@@ -37,6 +37,56 @@ class Action:
     detail: str
 
 
+class StabilityCycle:
+    """Pure state machine for repeated remote-off / DT-06 anti-mold checks."""
+
+    IDLE = "待機"
+    COOLING = "冷房運轉中"
+    WAITING_DT06 = "等待 DT-06 防霉"
+    COMPLETED = "防霉完成"
+
+    def __init__(self, run_seconds: float = 10.0) -> None:
+        self.run_seconds = max(1.0, float(run_seconds))
+        self.active = False
+        self.state = self.IDLE
+        self.completed_rounds = 0
+        self.round_number = 0
+        self.remaining_seconds = 0.0
+
+    def start(self) -> None:
+        self.active = True
+        self.round_number = self.completed_rounds + 1
+        self.state = self.COOLING
+        self.remaining_seconds = self.run_seconds
+
+    def stop(self) -> None:
+        self.active = False
+        self.state = self.IDLE
+        self.remaining_seconds = 0.0
+
+    def advance(self, seconds: float) -> str | None:
+        if not self.active or self.state != self.COOLING:
+            return None
+        self.remaining_seconds = max(0.0, self.remaining_seconds - max(0.0, seconds))
+        if self.remaining_seconds > 0:
+            return None
+        self.state = self.WAITING_DT06
+        return "remote_off"
+
+    def observe_dt06_off(self) -> bool:
+        if not self.active or self.state != self.WAITING_DT06:
+            return False
+        self.completed_rounds += 1
+        self.state = self.COMPLETED
+        return True
+
+    def begin_next_round(self) -> None:
+        if self.active:
+            self.round_number = self.completed_rounds + 1
+            self.state = self.COOLING
+            self.remaining_seconds = self.run_seconds
+
+
 class VirtualAirConditioner:
     def __init__(self) -> None:
         self.power = False

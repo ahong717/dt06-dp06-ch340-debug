@@ -6,8 +6,8 @@ import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from ac_emulator import FANS, MODES, SWINGS, VirtualAirConditioner
-from midea_protocol import FrameStream, hex_bytes
+from ac_emulator import FANS, MODES, SWINGS, StabilityCycle, VirtualAirConditioner
+from midea_protocol import DEVICE_CONTROL, DEVICE_QUERY, FrameStream, hex_bytes, parse_frame
 
 try:
     import serial
@@ -21,8 +21,8 @@ class SimulatorApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("DT-06 FINAL｜三洋冷氣 UART 模擬器")
-        self.geometry("1120x760")
-        self.minsize(940, 650)
+        self.geometry("1420x780")
+        self.minsize(1120, 650)
         self.configure(bg="#eef2f7")
         self.ac = VirtualAirConditioner()
         self.events: queue.Queue = queue.Queue()
@@ -35,6 +35,15 @@ class SimulatorApp(tk.Tk):
         self.response_delay_ms = 0
         self.drop_responses.trace_add("write", self._update_fault_settings)
         self.delay_ms.trace_add("write", self._update_fault_settings)
+        self.compact_log = tk.BooleanVar(value=True)
+        self.cycle_enabled = tk.BooleanVar(value=False)
+        self.cycle_run_seconds = tk.IntVar(value=10)
+        self.cycle_status = tk.StringVar(value="待機")
+        self.cycle_round = tk.StringVar(value="第 0 次")
+        self.cycle_remaining = tk.StringVar(value="--")
+        self.cycle = StabilityCycle(self.cycle_run_seconds.get())
+        self.cycle_last_tick = time.monotonic()
+        self.cycle_next_round_job = None
         self.vars = {name: tk.StringVar() for name in (
             "connection", "rx", "tx", "valid", "power", "mode", "target", "indoor",
             "outdoor", "fan", "swing", "display", "preset", "on_timer", "off_timer", "action"
@@ -61,7 +70,15 @@ class SimulatorApp(tk.Tk):
         self.connection_dot = self.connection_light.create_oval(3, 3, 17, 17, fill="#d64545", outline="")
         ttk.Label(header, textvariable=self.vars["connection"], background="white").pack(side="right")
 
-        connection = ttk.Frame(self, padding=14, style="Card.TFrame")
+        body = ttk.Frame(self)
+        body.pack(fill="both", expand=True, padx=12, pady=4)
+        left = ttk.Frame(body)
+        left.pack(side="left", fill="both", expand=True)
+        right = ttk.Frame(body, width=310, padding=12, style="Card.TFrame")
+        right.pack(side="right", fill="y", padx=(8, 0))
+        right.pack_propagate(False)
+
+        connection = ttk.Frame(left, padding=14, style="Card.TFrame")
         connection.pack(fill="x", padx=16, pady=8)
         ttk.Label(connection, text="CH340 COM 埠", background="white").pack(side="left")
         self.port_box = ttk.Combobox(connection, width=34, state="readonly")
@@ -73,7 +90,7 @@ class SimulatorApp(tk.Tk):
         ttk.Label(connection, text="回應延遲 ms", background="white").pack(side="left")
         ttk.Spinbox(connection, from_=0, to=5000, increment=50, width=7, textvariable=self.delay_ms).pack(side="left", padx=5)
 
-        cards = ttk.Frame(self)
+        cards = ttk.Frame(left)
         cards.pack(fill="x", padx=12, pady=4)
         for column, (key, title) in enumerate((("rx", "RX 收到"), ("tx", "TX 回傳"), ("valid", "有效封包"), ("action", "最近動作"))):
             card = ttk.Frame(cards, padding=12, style="Card.TFrame")
@@ -82,7 +99,7 @@ class SimulatorApp(tk.Tk):
             ttk.Label(card, text=title, style="CardTitle.TLabel").pack(anchor="w")
             ttk.Label(card, textvariable=self.vars[key], style="CardValue.TLabel", wraplength=260).pack(anchor="w", pady=(4, 0))
 
-        state = ttk.Frame(self)
+        state = ttk.Frame(left)
         state.pack(fill="x", padx=12)
         items = (("power", "電源"), ("mode", "模式"), ("target", "設定溫度"), ("indoor", "室內溫度"),
                  ("outdoor", "室外溫度"), ("fan", "風量"), ("swing", "擺風"), ("display", "面板燈"),
@@ -95,7 +112,7 @@ class SimulatorApp(tk.Tk):
             ttk.Label(card, text=title, style="CardTitle.TLabel").pack(anchor="w")
             ttk.Label(card, textvariable=self.vars[key], style="CardValue.TLabel").pack(anchor="w", pady=(4, 0))
 
-        controls = ttk.Frame(self, padding=12, style="Card.TFrame")
+        controls = ttk.Frame(left, padding=12, style="Card.TFrame")
         controls.pack(fill="x", padx=16, pady=8)
         ttk.Label(controls, text="模擬感測值：", background="white").pack(side="left")
         self.indoor_input = tk.DoubleVar(value=27)
@@ -106,11 +123,142 @@ class SimulatorApp(tk.Tk):
         ttk.Spinbox(controls, from_=-40, to=70, increment=0.5, width=7, textvariable=self.outdoor_input).pack(side="left")
         ttk.Button(controls, text="套用並在下次查詢回報", command=self.apply_temperatures).pack(side="left", padx=10)
 
-        log_frame = ttk.Frame(self, padding=8, style="Card.TFrame")
+        log_frame = ttk.Frame(left, padding=8, style="Card.TFrame")
         log_frame.pack(fill="both", expand=True, padx=16, pady=(0, 16))
-        ttk.Label(log_frame, text="UART 封包與解讀紀錄", background="white", font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(0, 6))
+        log_title = ttk.Frame(log_frame, style="Card.TFrame")
+        log_title.pack(fill="x", pady=(0, 6))
+        ttk.Label(log_title, text="UART 封包與解讀紀錄", background="white", font=("Segoe UI", 11, "bold")).pack(side="left")
+        ttk.Checkbutton(log_title, text="精簡日誌（過濾輪詢查詢）", variable=self.compact_log).pack(side="right")
         self.log = tk.Text(log_frame, height=12, font=("Consolas", 9), bg="#0b1f33", fg="#d9eaf7", insertbackground="white", wrap="none")
         self.log.pack(fill="both", expand=True)
+
+        self._build_remote_panel(right)
+
+    def _build_remote_panel(self, parent: ttk.Frame) -> None:
+        ttk.Label(parent, text="模擬實體遙控器 (IR Remote)", style="CardTitle.TLabel").pack(anchor="w", pady=(2, 12))
+        ttk.Button(parent, text="電源 ON / OFF", command=self._remote_power).pack(fill="x", pady=3)
+        ttk.Label(parent, text="模式", style="CardTitle.TLabel").pack(anchor="w", pady=(12, 3))
+        mode_row = ttk.Frame(parent, style="Card.TFrame")
+        mode_row.pack(fill="x")
+        for label, mode in (("冷房", 2), ("除濕", 3), ("送風", 5), ("暖房", 4), ("自動", 1)):
+            ttk.Button(mode_row, text=label, command=lambda value=mode: self._remote_mode(value)).pack(side="left", expand=True, fill="x", padx=1)
+        ttk.Label(parent, text="溫度", style="CardTitle.TLabel").pack(anchor="w", pady=(12, 3))
+        temp_row = ttk.Frame(parent, style="Card.TFrame")
+        temp_row.pack(fill="x")
+        ttk.Button(temp_row, text="▲", command=lambda: self._remote_temperature(1)).pack(side="left", expand=True, fill="x")
+        ttk.Label(temp_row, textvariable=self.vars["target"], width=10, anchor="center", background="white").pack(side="left")
+        ttk.Button(temp_row, text="▼", command=lambda: self._remote_temperature(-1)).pack(side="left", expand=True, fill="x")
+        ttk.Button(parent, text="風量循環（自動→靜音→低→中→高→強力）", command=self._remote_fan).pack(fill="x", pady=3)
+        ttk.Button(parent, text="擺風切換", command=self._remote_swing).pack(fill="x", pady=3)
+
+        ttk.Separator(parent).pack(fill="x", pady=14)
+        ttk.Checkbutton(parent, text="啟用防霉自動穩定度測試", variable=self.cycle_enabled, command=self._toggle_cycle).pack(anchor="w")
+        ttk.Label(parent, text="每輪冷房運轉時間（秒，可修改）", style="CardTitle.TLabel").pack(anchor="w", pady=(10, 3))
+        ttk.Spinbox(parent, from_=1, to=3600, width=8, textvariable=self.cycle_run_seconds).pack(anchor="w")
+        ttk.Label(parent, textvariable=self.cycle_round, background="white").pack(anchor="w", pady=(12, 2))
+        ttk.Label(parent, textvariable=self.cycle_status, background="white", wraplength=270).pack(anchor="w", pady=2)
+        ttk.Label(parent, textvariable=self.cycle_remaining, background="white").pack(anchor="w", pady=2)
+        ttk.Label(parent, text="流程：遙控開冷房 → 運轉倒數 → 遙控關機 → 等待 DT-06 防霉關機指令 → 下一輪", background="white", wraplength=275).pack(anchor="w", pady=(12, 0))
+
+    def _remote_power(self) -> None:
+        self.ac.power = not self.ac.power
+        self.ac.last_action = type(self.ac.last_action)("REMOTE 電源", "開機" if self.ac.power else "關機")
+        self._append_log("REMOTE", "電源開機" if self.ac.power else "電源關機")
+        self._refresh_state()
+
+    def _remote_mode(self, mode: int) -> None:
+        self.ac.raw_mode = mode
+        self.ac.power = True
+        self.ac.last_action = type(self.ac.last_action)("REMOTE 模式", MODES[mode])
+        self._append_log("REMOTE", f"模式變更：{MODES[mode]}")
+        self._refresh_state()
+
+    def _remote_temperature(self, delta: int) -> None:
+        self.ac.target_temperature = max(16.0, min(30.0, self.ac.target_temperature + delta))
+        self._append_log("REMOTE", f"溫度變更：{self.ac.target_temperature:.1f} °C")
+        self._refresh_state()
+
+    def _remote_fan(self) -> None:
+        values = (102, 20, 40, 60, 80, 100)
+        try:
+            index = values.index(self.ac.fan)
+        except ValueError:
+            index = 0
+        self.ac.fan = values[(index + 1) % len(values)]
+        self._append_log("REMOTE", f"風量變更：{FANS[self.ac.fan]}")
+        self._refresh_state()
+
+    def _remote_swing(self) -> None:
+        values = (0x00, 0x0C, 0x03, 0x0F)
+        self.ac.swing = values[(values.index(self.ac.swing) + 1) % len(values)] if self.ac.swing in values else values[0]
+        self._append_log("REMOTE", f"擺風變更：{SWINGS[self.ac.swing]}")
+        self._refresh_state()
+
+    def _toggle_cycle(self) -> None:
+        if not self.cycle_enabled.get():
+            self.cycle.stop()
+            if self.cycle_next_round_job:
+                self.after_cancel(self.cycle_next_round_job)
+                self.cycle_next_round_job = None
+            self.cycle_status.set("待機")
+            self.cycle_remaining.set("--")
+            self._append_log("CYCLE", "防霉穩定度測試停止")
+            return
+        try:
+            seconds = max(1, int(self.cycle_run_seconds.get()))
+        except (tk.TclError, ValueError):
+            self.cycle_enabled.set(False)
+            messagebox.showwarning("參數錯誤", "每輪冷房運轉時間必須是 1 秒以上的整數。")
+            return
+        if not (self.worker and self.worker.is_alive()):
+            self.cycle_enabled.set(False)
+            messagebox.showwarning("尚未連線", "請先連線 DT-06，再啟用穩定度測試。")
+            return
+        self.cycle = StabilityCycle(seconds)
+        self.cycle.start()
+        self.cycle_last_tick = time.monotonic()
+        self._remote_mode(2)
+        self._append_log("CYCLE", f"第 1 次開始，冷房運轉 {seconds} 秒")
+        self._cycle_tick()
+
+    def _cycle_tick(self) -> None:
+        if not self.cycle_enabled.get() or not self.cycle.active:
+            return
+        now = time.monotonic()
+        event = self.cycle.advance(now - self.cycle_last_tick)
+        self.cycle_last_tick = now
+        if event == "remote_off":
+            self.ac.power = False
+            self.ac.last_action = type(self.ac.last_action)("REMOTE 關機", "等待 DT-06 防霉")
+            self._append_log("REMOTE", "冷房時間到，遙控器關機；等待 DT-06 防霉")
+            self._refresh_state()
+        self._refresh_cycle_ui()
+        self.after(100, self._cycle_tick)
+
+    def _observe_cycle_frame(self, frame) -> None:
+        if frame.frame_type != DEVICE_CONTROL or len(frame.body) < 2 or frame.body[0] != 0x40:
+            return
+        if frame.body[1] & 0x01:
+            return
+        if self.cycle.observe_dt06_off():
+            self._append_log("CYCLE", f"第 {self.cycle.completed_rounds} 次防霉完成，進入下一輪")
+            self._refresh_cycle_ui()
+            self.cycle_next_round_job = self.after(100, self._begin_next_cycle_round)
+
+    def _begin_next_cycle_round(self) -> None:
+        self.cycle_next_round_job = None
+        if not self.cycle_enabled.get() or not self.cycle.active:
+            return
+        self.cycle.begin_next_round()
+        self.cycle_last_tick = time.monotonic()
+        self._remote_mode(2)
+        self._refresh_cycle_ui()
+        self._append_log("CYCLE", f"第 {self.cycle.round_number} 次開始")
+
+    def _refresh_cycle_ui(self) -> None:
+        self.cycle_round.set(f"第 {self.cycle.round_number} 次（完成 {self.cycle.completed_rounds} 次）")
+        self.cycle_status.set(self.cycle.state)
+        self.cycle_remaining.set(f"剩餘 {self.cycle.remaining_seconds:.1f} 秒" if self.cycle.state == StabilityCycle.COOLING else "")
 
     def refresh_ports(self) -> None:
         if list_ports is None:
@@ -194,18 +342,24 @@ class SimulatorApp(tk.Tk):
             elif kind == "rx":
                 self.vars["rx"].set(str(self.ac.valid_rx))
                 self.vars["valid"].set("CRC / Checksum OK")
-                self._append_log("DT06→AC", hex_bytes(payload.raw))
+                self._observe_cycle_frame(payload)
+                self._append_frame_log("DT06→AC", payload.raw)
             elif kind == "tx":
                 self.vars["tx"].set(str(self.ac.tx_count))
-                self._append_log("AC→DT06", hex_bytes(payload))
+                self._append_frame_log("AC→DT06", payload)
             elif kind == "action":
                 self.vars["action"].set(f"{payload.name}｜{payload.detail}")
-                self._append_log("ACTION", f"{payload.name}: {payload.detail}")
+                if not (self.compact_log.get() and payload.name == "狀態查詢"):
+                    self._append_log("DT06→AC", f"{payload.name}: {payload.detail}")
             elif kind == "error":
                 self.vars["valid"].set("封包錯誤")
                 self._append_log("ERROR", payload)
             elif kind == "disconnected":
                 self._append_log("ERROR", payload)
+                if self.cycle_enabled.get():
+                    self.cycle_enabled.set(False)
+                    self.cycle.stop()
+                    self._append_log("CYCLE", "連線中斷，穩定度測試停止")
             elif kind == "stopped":
                 self.vars["connection"].set("未連線")
                 self.connection_light.itemconfigure(self.connection_dot, fill="#d64545")
@@ -255,6 +409,19 @@ class SimulatorApp(tk.Tk):
         stamp = time.strftime("%H:%M:%S")
         self.log.insert("end", f"{stamp} [{direction:<9}] {message}\n")
         self.log.see("end")
+
+    def _append_frame_log(self, direction: str, raw: bytes) -> None:
+        if self.compact_log.get():
+            try:
+                frame = parse_frame(raw)
+            except ValueError:
+                frame = None
+            if frame is not None:
+                if frame.frame_type == DEVICE_QUERY and frame.body and frame.body[0] == 0x41:
+                    return
+                if frame.body and frame.body[0] == 0xC0:
+                    return
+        self._append_log(direction, hex_bytes(raw))
 
     def _close(self) -> None:
         self.stop_event.set()

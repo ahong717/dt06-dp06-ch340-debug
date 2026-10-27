@@ -1,17 +1,9 @@
 $ErrorActionPreference = 'Stop'
-$project = Split-Path -Parent $PSScriptRoot
-$knownPython = 'C:\Users\chaoh\Documents\Codex\2026-07-31\new-chat-2\work\esphome-venv\Scripts\python.exe'
-
-if (Test-Path -LiteralPath $knownPython) {
-    $python = $knownPython
-} else {
-    $python = (Get-Command python -ErrorAction Stop).Source
+$root = Split-Path -Parent $PSScriptRoot
+$python = Join-Path $root '.venv\Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $python)) {
+    Write-Error '找不到專案 .venv，請先在根目錄執行 setup-dev.bat。'
+    exit 1
 }
-
-Push-Location $PSScriptRoot
-try {
-    & $python .\app.py
-} finally {
-    Pop-Location
-}
-
+Push-Location $root
+try { & $python 'simulator-desktop\app.py' } finally { Pop-Location }
