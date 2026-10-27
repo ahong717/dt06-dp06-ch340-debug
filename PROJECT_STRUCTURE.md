@@ -17,10 +17,12 @@ dt06-dp06-ch340-debug/
 ├─ reference/                        # FINAL 韌體與參考文件
 ├─ firmware-source/                  # 韌體原始碼副本
 ├─ setup-dev.bat / build-exe.bat     # 建環境與建置 EXE
+├─ release-exe.bat                  # 測試通過後準備 GitHub Release
 ├─ requirements-dev.txt              # 開發依賴
-├─ DT06_三洋冷氣模擬器.exe            # 已交付執行檔
-└─ .gitignore                        # 排除環境、快取、建置產物
+├─ DT06_三洋冷氣模擬器.exe            # 目前保存的已交付執行檔
+└─ release/                          # 發布準備包（由腳本產生）
 ```
 
-`.venv/`、`build-cache/`、`build-output/`、Python 快取及 PlatformIO 快取不是產品原始碼，
-可由腳本或工具重新建立，因此不納入 Git。網頁版與桌面版是兩個獨立程式。
+`.venv/` 是本機 Python 環境，`build-cache/` 是編譯暫存資料，`build-output/` 是尚未發布的候選 EXE。
+這些資料都可以由腳本重新建立，不需要放進 GitHub；它們不是遺失的產品檔案。正式發布檔會在驗證後，放到 GitHub Release。
+網頁版與桌面版是兩個獨立程式。

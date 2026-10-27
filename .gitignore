@@ -1,6 +1,7 @@
 # Generated build output and local tool caches
 build-cache/
 build-output/
+release/
 .venv/
 __pycache__/
 *.py[cod]
