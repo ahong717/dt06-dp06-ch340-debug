@@ -11,6 +11,9 @@
 - `simulator-desktop/ac_emulator.py`：虛擬冷氣狀態機。
 - `simulator-desktop/midea_protocol.py`：Midea/Sanyo UART 封包編解碼；已驗證的核心通訊檔案。
 - `simulator-desktop/run.ps1`：開發模式啟動腳本。
+- `requirements-dev.txt`：開發工具與套件清單，每行都有用途註解。
+- `setup-dev.bat`：雙擊建立 `.venv`、安裝套件並執行測試。
+- `build-exe.bat`：雙擊將桌面版原始碼編譯成 EXE。
 - `tests/`：自動測試。
 
 ## 獨立網頁版
@@ -25,5 +28,6 @@
 ## 不納入 Git 版本的建置快取
 
 - `build-cache/`：PyInstaller 建置產物、建置工具、PlatformIO 套件與 Python 快取。
+- `build-output/`：每次重新編譯產生的新 EXE，不納入 Git 版本。
 
 這些檔案可以重新產生，不是模擬器執行所需的產品原始碼。

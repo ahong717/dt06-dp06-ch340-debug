@@ -1,0 +1,10 @@
+# DT-06 三洋冷氣模擬器｜開發環境套件
+#
+# 這個檔案是給 pip 讀取的「套件清單」，不是程式本身。
+# setup-dev.bat 會自動安裝下面兩個套件。
+
+# 讓 Python 程式可以使用 CH340 / COM 埠。
+pyserial==3.5
+
+# 把 Python 原始碼打包成 Windows EXE。
+pyinstaller==6.16.0

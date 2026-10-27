@@ -14,6 +14,19 @@ DT06_三洋冷氣模擬器.exe
 
 不需要安裝 Python，也不需要輸入指令。
 
+## 換到另一台電腦開發
+
+第一步：安裝 Git 與 Python 3。
+
+第二步：從 Git 下載本專案後，直接雙擊專案最外層的 `setup-dev.bat`。
+這會建立專案自己的 `.venv`、安裝開發套件，並執行自動測試。
+
+第三步：修改原始碼後，直接雙擊 `build-exe.bat`。
+新的 EXE 會放在 `build-output\DT06_Sanyo_AC_Simulator.exe`，不會覆蓋 Git 裡的既有第一版 EXE。
+
+這兩個 `.bat` 都是純文字的 Windows 指令檔，檔案內有逐行中文註解；
+可以用記事本開啟閱讀，不需要先懂 Python。
+
 原始碼開發模式才使用下面指令：
 
 ```powershell
