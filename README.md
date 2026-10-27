@@ -27,8 +27,7 @@ GitHub 上的原始碼是開發進度，不代表每一個 Commit 都已通過�
 
 ## 開發與測試入口
 
-第一次在新電腦建立環境：雙擊 `setup-dev.bat`。修改程式後：雙擊 `build-exe.bat`，產物在
-`build-output\\DT06_Sanyo_AC_Simulator.exe`。詳細步驟請看[開發者指南](docs/DEVELOPER-GUIDE.md)。
+第一次在新電腦建立環境：雙擊 `setup-dev.bat`。日常修改後先執行自動測試，再雙擊 `build-exe.bat` 產生候選 EXE。完整的指令、測試與發布流程請看[開發者指南](docs/DEVELOPER-GUIDE.md)。
 
 ## 目前模擬範圍
 
